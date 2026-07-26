@@ -28,6 +28,7 @@ func Detect(ctx context.Context, exec transport.Executor) (*Report, error) {
 		{"compose", "docker compose version >/dev/null 2>&1"},
 		{"kvm", "test -c /dev/kvm && grep -Eq 'vmx|svm' /proc/cpuinfo"},
 		{"kind", "command -v kind >/dev/null 2>&1"},
+		{"kubectl", "command -v kubectl >/dev/null 2>&1"},
 		{"incus", "command -v incus >/dev/null 2>&1"},
 		{"cgroup_v2", "stat -fc %T /sys/fs/cgroup/ 2>/dev/null | grep -q cgroup2fs"},
 	}

@@ -50,10 +50,6 @@ func RequireRuntimeAccess(ctx context.Context, h *config.Host, exec transport.Ex
 	return nil
 }
 
-func DenyProviderAndDestroy(action string) error {
-	return fmt.Errorf("%s is not available in this release — cloud provider commands arrive in a later milestone", action)
-}
-
 func ConfirmDestructive(approvedOthers int, action string, forceYes bool) error {
 	if approvedOthers == 0 {
 		return nil
@@ -75,6 +71,38 @@ func ConfirmDestructive(approvedOthers int, action string, forceYes bool) error 
 		return fmt.Errorf("aborted")
 	}
 	return nil
+}
+
+func ConfirmPrompt(message string) error {
+	if !isTerminal() {
+		return fmt.Errorf("%s — re-run with --yes to confirm", message)
+	}
+	fmt.Fprintf(os.Stderr, "%s [y/N]: ", message)
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	if line != "y" && line != "yes" {
+		return fmt.Errorf("aborted")
+	}
+	return nil
+}
+
+func ConfirmYesNo(message string, defaultYes bool) bool {
+	if !isTerminal() {
+		return defaultYes
+	}
+	suffix := "[y/N]"
+	if defaultYes {
+		suffix = "[Y/n]"
+	}
+	fmt.Fprintf(os.Stderr, "%s %s: ", message, suffix)
+	reader := bufio.NewReader(os.Stdin)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	if line == "" {
+		return defaultYes
+	}
+	return line == "y" || line == "yes"
 }
 
 func isTerminal() bool {

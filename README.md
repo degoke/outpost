@@ -93,9 +93,37 @@ Collaborators with approved device access (role `member`) can use runtime and in
 |---------|---------|
 | `docker`, `compose`, `connect` | `host add`, `host use`, `host remove`, `host destroy` |
 | `status`, `top`, `capacity`, `disk`, `prune` | `init`, `invite create/list/approve/revoke` |
-| `host verify`, `host list` | Provider and cloud lifecycle commands |
+| `host verify`, `host list` | `host create/start/stop/restart/resize`, `provider login` |
+| `cluster list`, `cluster status`, `kubectl` | `cluster create`, `cluster delete`, `prune clusters` |
 
 Destructive commands (`compose down`, `docker rm`, `docker system prune`, etc.) warn when other approved devices may be affected.
+
+## AWS host provisioning
+
+```bash
+outpost provider login aws --profile my-profile --region eu-west-1
+outpost host create personal --provider aws --region eu-west-1
+outpost host start personal
+outpost host stop personal
+outpost host restart personal
+outpost host resize personal --instance-type t3.large
+outpost host destroy personal
+```
+
+`host remove` drops local configuration only; `host destroy` terminates the EC2 instance (with optional `--delete-volumes`).
+
+## Kubernetes clusters (kind)
+
+```bash
+outpost cluster create dev
+outpost cluster create staging --workers 2
+outpost cluster list
+outpost cluster status dev
+outpost kubectl --cluster dev get nodes
+outpost kubectl --cluster dev apply -f ./manifest.yaml
+outpost cluster delete dev
+outpost prune clusters --dry-run
+```
 
 ## Development
 

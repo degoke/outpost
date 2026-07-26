@@ -14,6 +14,7 @@ import (
 	"github.com/goke/outpost/internal/bootstrap"
 	"github.com/goke/outpost/internal/capabilities"
 	"github.com/goke/outpost/internal/capacity"
+	"github.com/goke/outpost/internal/cluster"
 	"github.com/goke/outpost/internal/compose"
 	"github.com/goke/outpost/internal/config"
 	"github.com/goke/outpost/internal/connect"
@@ -80,9 +81,12 @@ func New() *cobra.Command {
 	root.PersistentFlags().Bool("yes", false, "skip confirmation prompts")
 
 	root.AddCommand(app.hostCmd())
+	root.AddCommand(app.providerCmd())
 	root.AddCommand(app.initCmd())
 	root.AddCommand(app.dockerCmd())
 	root.AddCommand(app.composeCmd())
+	root.AddCommand(app.clusterCmd())
+	root.AddCommand(app.kubectlCmd())
 	root.AddCommand(app.connectCmd())
 	root.AddCommand(app.inviteCmd())
 	root.AddCommand(app.statusCmd())
@@ -168,12 +172,138 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 func (app *App) hostCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "host", Short: "Manage remote hosts"}
 	cmd.AddCommand(app.hostAddCmd())
+	cmd.AddCommand(app.hostCreateCmd())
 	cmd.AddCommand(app.hostListCmd())
 	cmd.AddCommand(app.hostUseCmd())
 	cmd.AddCommand(app.hostVerifyCmd())
+	cmd.AddCommand(app.hostStartCmd())
+	cmd.AddCommand(app.hostStopCmd())
+	cmd.AddCommand(app.hostRestartCmd())
+	cmd.AddCommand(app.hostResizeCmd())
 	cmd.AddCommand(app.hostRemoveCmd())
 	cmd.AddCommand(app.hostDestroyCmd())
 	cmd.AddCommand(app.hostCapabilitiesCmd())
+	return cmd
+}
+
+func (app *App) hostCreateCmd() *cobra.Command {
+	var providerName, region, profile, instanceType, sshCIDR string
+	var noCleanup bool
+	cmd := &cobra.Command{
+		Use:   "create NAME",
+		Short: "Provision a new cloud host",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			h, _ := app.Global.ResolveHost(app.HostFlag)
+			if h != nil {
+				if err := authz.RequireOwner(h, "host create"); err != nil {
+					return err
+				}
+			}
+			return (&host.Service{Global: app.Global, Out: app.Out}).Create(context.Background(), host.CreateOpts{
+				Name:         args[0],
+				ProviderName: providerName,
+				Region:       region,
+				Profile:      profile,
+				InstanceType: instanceType,
+				SSHCIDR:      sshCIDR,
+				NoCleanup:    noCleanup,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&providerName, "provider", "aws", "cloud provider")
+	cmd.Flags().StringVar(&region, "region", "", "cloud region")
+	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile name")
+	cmd.Flags().StringVar(&instanceType, "instance-type", "", "EC2 instance type")
+	cmd.Flags().StringVar(&sshCIDR, "ssh-cidr", "", "CIDR allowed for SSH ingress")
+	cmd.Flags().BoolVar(&noCleanup, "no-cleanup", false, "do not delete resources on failure")
+	return cmd
+}
+
+func (app *App) hostStartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "start NAME",
+		Short: "Start a stopped cloud host",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := (&host.Service{Global: app.Global, Out: app.Out}).Start(context.Background(), args[0]); err != nil {
+				return err
+			}
+			app.Out.Success("Host %q started", args[0])
+			return nil
+		},
+	}
+}
+
+func (app *App) hostStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop NAME",
+		Short: "Stop a cloud host",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := (&host.Service{Global: app.Global, Out: app.Out}).Stop(context.Background(), args[0]); err != nil {
+				return err
+			}
+			app.Out.Success("Host %q stopped", args[0])
+			return nil
+		},
+	}
+}
+
+func (app *App) hostRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart NAME",
+		Short: "Restart a cloud host",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := (&host.Service{Global: app.Global, Out: app.Out}).Restart(context.Background(), args[0]); err != nil {
+				return err
+			}
+			app.Out.Success("Host %q restarted", args[0])
+			return nil
+		},
+	}
+}
+
+func (app *App) hostResizeCmd() *cobra.Command {
+	var instanceType string
+	cmd := &cobra.Command{
+		Use:   "resize NAME",
+		Short: "Resize a cloud host instance type",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if instanceType == "" {
+				return fmt.Errorf("--instance-type is required")
+			}
+			if err := (&host.Service{Global: app.Global, Out: app.Out}).Resize(context.Background(), args[0], instanceType); err != nil {
+				return err
+			}
+			app.Out.Success("Host %q resized to %s", args[0], instanceType)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&instanceType, "instance-type", "", "new EC2 instance type")
+	_ = cmd.MarkFlagRequired("instance-type")
+	return cmd
+}
+
+func (app *App) providerCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "provider", Short: "Manage cloud provider credentials"}
+	cmd.AddCommand(app.providerLoginAWSCmd())
+	return cmd
+}
+
+func (app *App) providerLoginAWSCmd() *cobra.Command {
+	var profile, region string
+	cmd := &cobra.Command{
+		Use:   "login aws",
+		Short: "Validate and store AWS credentials profile",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return host.ProviderLogin(context.Background(), app.Global, app.Out, profile, region)
+		},
+	}
+	cmd.Flags().StringVar(&profile, "profile", "", "AWS shared config profile")
+	cmd.Flags().StringVar(&region, "region", "", "default AWS region")
 	return cmd
 }
 
@@ -260,21 +390,21 @@ func (app *App) hostRemoveCmd() *cobra.Command {
 }
 
 func (app *App) hostDestroyCmd() *cobra.Command {
-	return &cobra.Command{
+	var deleteVolumes bool
+	cmd := &cobra.Command{
 		Use:   "destroy NAME",
 		Short: "Destroy a cloud host (owner only)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			h, err := app.Global.ResolveHost(args[0])
-			if err != nil {
+			if err := (&host.Service{Global: app.Global, Out: app.Out}).Destroy(context.Background(), args[0], deleteVolumes, app.ForceYes); err != nil {
 				return err
 			}
-			if err := authz.RequireOwner(h, "host destroy"); err != nil {
-				return err
-			}
-			return authz.DenyProviderAndDestroy("host destroy")
+			app.Out.Success("Destroyed host %q", args[0])
+			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&deleteVolumes, "delete-volumes", false, "delete attached EBS volumes")
+	return cmd
 }
 
 func (app *App) initCmd() *cobra.Command {
@@ -778,6 +908,168 @@ func (app *App) capacityCmd() *cobra.Command {
 	}
 }
 
+func (app *App) withClusterExecutor(run func(context.Context, transport.Executor, *config.Host, *cluster.Service) error) error {
+	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+		if err := bootstrap.EnsureKubernetesTools(ctx, exec); err != nil {
+			return err
+		}
+		svc := &cluster.Service{Exec: exec, Out: app.Out, HostName: h.Name}
+		return run(ctx, exec, h, svc)
+	})
+}
+
+func (app *App) clusterCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "cluster", Short: "Manage Kubernetes clusters on the remote host"}
+	cmd.AddCommand(app.clusterCreateCmd())
+	cmd.AddCommand(app.clusterListCmd())
+	cmd.AddCommand(app.clusterStatusCmd())
+	cmd.AddCommand(app.clusterDeleteCmd())
+	return cmd
+}
+
+func (app *App) clusterCreateCmd() *cobra.Command {
+	var workers, controlPlanes int
+	cmd := &cobra.Command{
+		Use:   "create NAME",
+		Short: "Create a named kind cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
+				return svc.Create(ctx, args[0], workers, controlPlanes)
+			})
+		},
+	}
+	cmd.Flags().IntVar(&workers, "workers", 0, "number of worker nodes")
+	cmd.Flags().IntVar(&controlPlanes, "control-plane", 1, "number of control-plane nodes")
+	return cmd
+}
+
+func (app *App) clusterListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List Kubernetes clusters",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
+				clusters, err := svc.List(ctx)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(clusters)
+				}
+				if len(clusters) == 0 {
+					app.Out.Info("No clusters found")
+					return nil
+				}
+				for _, c := range clusters {
+					app.Out.Info("%s  status=%s  nodes=%d  control=%d  workers=%d",
+						c.Name, c.Status, c.NodeCount, c.ControlPlanes, c.Workers)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) clusterStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status NAME",
+		Short: "Show cluster status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
+				c, err := svc.Status(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(c)
+				}
+				app.Out.Info("Cluster %s: status=%s nodes=%d", c.Name, c.Status, c.NodeCount)
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) clusterDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete NAME",
+		Short: "Delete a Kubernetes cluster",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
+				if err := authz.RequireOwner(h, "cluster delete"); err != nil {
+					return err
+				}
+				count, _ := share.ApprovedCount(ctx, exec)
+				if err := authz.ConfirmDestructive(count, "cluster delete", app.ForceYes); err != nil {
+					return err
+				}
+				if !app.ForceYes {
+					if err := authz.ConfirmPrompt("This will delete the kind cluster and its node containers"); err != nil {
+						return err
+					}
+				}
+				if err := svc.Delete(ctx, args[0]); err != nil {
+					return err
+				}
+				app.Out.Success("Deleted cluster %q", args[0])
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) kubectlCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "kubectl [args...]",
+		Short:              "Run kubectl against a remote cluster",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clusterName, kubectlArgs, err := parseKubectlArgs(args)
+			if err != nil {
+				return err
+			}
+			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
+				_ = svc
+				code, err := cluster.RunKubectl(ctx, exec, clusterName, kubectlArgs)
+				if err != nil {
+					return err
+				}
+				if code != 0 {
+					os.Exit(code)
+				}
+				return nil
+			})
+		},
+	}
+	return cmd
+}
+
+func parseKubectlArgs(args []string) (clusterName string, rest []string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--cluster" {
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--cluster requires a value")
+			}
+			clusterName = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "--cluster=") {
+			clusterName = strings.TrimPrefix(a, "--cluster=")
+			continue
+		}
+		rest = append(rest, a)
+	}
+	if clusterName == "" {
+		return "", nil, fmt.Errorf("--cluster is required")
+	}
+	return clusterName, rest, nil
+}
+
 func (app *App) diskCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "disk",
@@ -831,7 +1123,55 @@ func (app *App) pruneCmd() *cobra.Command {
 	volumesCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
 	volumesCmd.Flags().BoolVar(&force, "force", false, "skip volume name confirmation when used with --yes")
 	cmd.AddCommand(volumesCmd)
+	clustersCmd := &cobra.Command{
+		Use:   "clusters",
+		Short: "Prune kind clusters (explicit, owner only)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.runPruneClusters(dryRun, force)
+		},
+	}
+	clustersCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
+	clustersCmd.Flags().BoolVar(&force, "force", false, "skip confirmation when used with --yes")
+	cmd.AddCommand(clustersCmd)
 	return cmd
+}
+
+func (app *App) runPruneClusters(dryRun, force bool) error {
+	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+		if err := authz.RequireOwner(h, "prune clusters"); err != nil {
+			return err
+		}
+		opts := prune.Options{Clusters: true, Force: force}
+		plan, err := prune.BuildPlan(ctx, exec, opts)
+		if err != nil {
+			return err
+		}
+		if dryRun {
+			if app.Out.JSON {
+				return app.Out.PrintJSON(plan)
+			}
+			for _, c := range plan.Candidates {
+				app.Out.Info("[%s] %s %s — %s", c.Kind, c.ID, c.Name, c.Reason)
+			}
+			return nil
+		}
+		count, _ := share.ApprovedCount(ctx, exec)
+		if err := authz.ConfirmDestructive(count, "prune clusters", app.ForceYes); err != nil {
+			return err
+		}
+		if !app.ForceYes && !force {
+			return fmt.Errorf("aborted — re-run with --yes to confirm cluster prune")
+		}
+		result, err := prune.Execute(ctx, exec, plan, opts)
+		if err != nil {
+			return err
+		}
+		if app.Out.JSON {
+			return app.Out.PrintJSON(result)
+		}
+		app.Out.Success("Pruned %d cluster(s)", len(result.Removed))
+		return nil
+	})
 }
 
 func (app *App) runPrune(dryRun, volumes, force bool) error {

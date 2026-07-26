@@ -24,8 +24,9 @@ type PrunePlan struct {
 }
 
 type Options struct {
-	Volumes bool
-	Force   bool
+	Volumes  bool
+	Clusters bool
+	Force    bool
 }
 
 type Result struct {
@@ -53,6 +54,24 @@ func BuildPlan(ctx context.Context, exec transport.Executor, opts Options) (*Pru
 			plan.Candidates = append(plan.Candidates, Candidate{
 				Kind: "volume", ID: v.Name, Name: v.Name,
 				Reason: "unused named volume",
+			})
+		}
+		return plan, nil
+	}
+
+	if opts.Clusters {
+		clusters, err := inspect.RunOutput(ctx, exec, "kind get clusters 2>/dev/null || true")
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range strings.Split(strings.TrimSpace(clusters), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			plan.Candidates = append(plan.Candidates, Candidate{
+				Kind: "cluster", ID: line, Name: strings.TrimPrefix(line, "outpost-"),
+				Reason: "kind cluster",
 			})
 		}
 		return plan, nil
@@ -123,6 +142,9 @@ func Execute(ctx context.Context, exec transport.Executor, plan *PrunePlan, opts
 	if opts.Volumes {
 		return executeVolumes(ctx, exec, plan)
 	}
+	if opts.Clusters {
+		return executeClusters(ctx, exec, plan)
+	}
 	before, _ := inspect.DockerReclaimableBytes(ctx, exec)
 	result := &Result{EstimatedBytes: plan.EstimatedBytes}
 	seen := map[string]bool{}
@@ -172,6 +194,24 @@ func executeVolumes(ctx context.Context, exec transport.Executor, plan *PrunePla
 			continue
 		}
 		cmd := fmt.Sprintf("docker volume rm %s", shellQuote(c.ID))
+		code, err := exec.Run(ctx, cmd, transport.RunOpts{})
+		if err != nil {
+			return result, err
+		}
+		if code == 0 {
+			result.Removed = append(result.Removed, c)
+		}
+	}
+	return result, nil
+}
+
+func executeClusters(ctx context.Context, exec transport.Executor, plan *PrunePlan) (*Result, error) {
+	result := &Result{EstimatedBytes: plan.EstimatedBytes}
+	for _, c := range plan.Candidates {
+		if c.Kind != "cluster" {
+			continue
+		}
+		cmd := fmt.Sprintf("kind delete cluster --name %s", shellQuote(c.ID))
 		code, err := exec.Run(ctx, cmd, transport.RunOpts{})
 		if err != nil {
 			return result, err

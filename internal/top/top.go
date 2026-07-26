@@ -22,6 +22,8 @@ func RunOnce(ctx context.Context, exec transport.Executor, out io.Writer) error 
 	if err != nil {
 		return err
 	}
+	kindStats, _ := inspect.ListKindNodeStats(ctx, exec)
+	stats = append(stats, kindStats...)
 	if len(stats) == 0 {
 		fmt.Fprintln(out, "No running containers")
 		return nil

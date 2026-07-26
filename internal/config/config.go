@@ -27,18 +27,40 @@ type Global struct {
 	Version    int              `yaml:"version"`
 	ActiveHost string           `yaml:"active_host"`
 	Hosts      map[string]*Host `yaml:"hosts"`
+	Providers  ProvidersConfig  `yaml:"providers,omitempty"`
+}
+
+type ProvidersConfig struct {
+	AWS AWSProviderConfig `yaml:"aws,omitempty"`
+}
+
+type AWSProviderConfig struct {
+	DefaultProfile string `yaml:"default_profile,omitempty"`
+	DefaultRegion  string `yaml:"default_region,omitempty"`
+}
+
+type ProviderMeta struct {
+	Name          string   `yaml:"name"`
+	Region        string   `yaml:"region"`
+	Profile       string   `yaml:"profile,omitempty"`
+	InstanceID    string   `yaml:"instance_id"`
+	InstanceType  string   `yaml:"instance_type"`
+	SecurityGroup string   `yaml:"security_group_id,omitempty"`
+	VolumeIDs     []string `yaml:"volume_ids,omitempty"`
+	State         string   `yaml:"state,omitempty"`
 }
 
 type Host struct {
-	Name         string `yaml:"-"`
-	Hostname     string `yaml:"hostname"`
-	User         string `yaml:"user"`
-	Port         int    `yaml:"port"`
-	IdentityFile string `yaml:"identity_file"`
-	Role         Role   `yaml:"role"`
-	OwnerHostID  string `yaml:"owner_host_id,omitempty"`
-	HostID       string `yaml:"host_id,omitempty"`
-	DeviceID     string `yaml:"device_id,omitempty"`
+	Name         string        `yaml:"-"`
+	Hostname     string        `yaml:"hostname"`
+	User         string        `yaml:"user"`
+	Port         int           `yaml:"port"`
+	IdentityFile string        `yaml:"identity_file"`
+	Role         Role          `yaml:"role"`
+	OwnerHostID  string        `yaml:"owner_host_id,omitempty"`
+	HostID       string        `yaml:"host_id,omitempty"`
+	DeviceID     string        `yaml:"device_id,omitempty"`
+	Provider     *ProviderMeta `yaml:"provider,omitempty"`
 }
 
 type Project struct {
@@ -195,6 +217,18 @@ func ExpandPath(p string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
+}
+
+func KubeconfigsDir() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "kubeconfigs"), nil
+}
+
+func SanitizeClusterName(name string) string {
+	return SanitizeProjectName(name)
 }
 
 func SanitizeProjectName(name string) string {

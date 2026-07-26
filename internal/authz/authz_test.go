@@ -19,10 +19,6 @@ func TestConfirmDestructiveSkipsWhenAlone(t *testing.T) {
 	require.NoError(t, authz.ConfirmDestructive(0, "compose down", false))
 }
 
-func TestDenyProviderAndDestroy(t *testing.T) {
-	require.Error(t, authz.DenyProviderAndDestroy("host destroy"))
-}
-
 func TestMemberAllowedCommands(t *testing.T) {
 	require.True(t, authz.MemberAllowedCommand("docker"))
 	require.True(t, authz.MemberAllowedCommand("status"))
@@ -37,6 +33,14 @@ func TestRequireMemberAllowed(t *testing.T) {
 	require.NoError(t, authz.RequireMemberAllowed(member, "host verify"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "invite join"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "prune volumes"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "cluster list"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "cluster status"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "kubectl"))
+	require.Error(t, authz.RequireMemberAllowed(member, "cluster create"))
+	require.Error(t, authz.RequireMemberAllowed(member, "cluster delete"))
+	require.Error(t, authz.RequireMemberAllowed(member, "prune clusters"))
+	require.Error(t, authz.RequireMemberAllowed(member, "host create"))
+	require.Error(t, authz.RequireMemberAllowed(member, "provider login"))
 	require.Error(t, authz.RequireMemberAllowed(member, "host add"))
 	require.Error(t, authz.RequireMemberAllowed(member, "init"))
 	require.Error(t, authz.RequireMemberAllowed(member, "invite create"))

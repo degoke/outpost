@@ -34,7 +34,7 @@ func CollectHostMetrics(ctx context.Context, exec transport.Executor) (HostMetri
 	out.Reset()
 	code, err = exec.Run(ctx, "df -B1 / | tail -1", transport.RunOpts{Stdout: &out})
 	if err == nil && code == 0 {
-		total, used, avail, err := ParseDFBytes("Filesystem " + strings.TrimSpace(out.String()))
+		total, used, avail, err := ParseDFBytes("Filesystem\n" + strings.TrimSpace(out.String()))
 		if err == nil {
 			m.DiskTotal, m.DiskUsed, m.DiskAvailable = total, used, avail
 		}
@@ -143,6 +143,23 @@ func ListContainerStats(ctx context.Context, exec transport.Executor) ([]Contain
 		if p, ok := byName[stats[i].Name]; ok {
 			stats[i].Project = p
 		}
+	}
+	return stats, nil
+}
+
+func ListKindNodeStats(ctx context.Context, exec transport.Executor) ([]ContainerStats, error) {
+	var out bytes.Buffer
+	cmd := "docker stats --no-stream --filter label=io.x-k8s.kind.role --format '{{json .}}'"
+	code, err := exec.Run(ctx, cmd, transport.RunOpts{Stdout: &out})
+	if err != nil || code != 0 {
+		return nil, nil
+	}
+	stats, err := ParseDockerStatsLines(out.String())
+	if err != nil {
+		return nil, err
+	}
+	for i := range stats {
+		stats[i].Project = "kind:" + stats[i].Name
 	}
 	return stats, nil
 }

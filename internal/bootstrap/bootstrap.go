@@ -156,8 +156,46 @@ fi
 	return nil
 }
 
+const kubernetesToolsScript = `
+set -e
+if command -v kubectl >/dev/null 2>&1 && command -v kind >/dev/null 2>&1; then
+  exit 0
+fi
+need_sudo=""
+if [ "$(id -u)" -ne 0 ]; then need_sudo="sudo"; fi
+if ! command -v kubectl >/dev/null 2>&1; then
+  curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o /tmp/kubectl
+  chmod +x /tmp/kubectl
+  $need_sudo mv /tmp/kubectl /usr/local/bin/kubectl
+fi
+if ! command -v kind >/dev/null 2>&1; then
+  curl -fsSL https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64 -o /tmp/kind
+  chmod +x /tmp/kind
+  $need_sudo mv /tmp/kind /usr/local/bin/kind
+fi
+`
+
+func EnsureKubernetesTools(ctx context.Context, exec transport.Executor) error {
+	code, err := exec.Run(ctx, "command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1", transport.RunOpts{})
+	if err != nil {
+		return err
+	}
+	if code == 0 {
+		return nil
+	}
+	var stderr strings.Builder
+	code, err = exec.Run(ctx, kubernetesToolsScript, transport.RunOpts{Stderr: &stderr})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("kubernetes tools install failed: %s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 func ensureDirs(ctx context.Context, exec transport.Executor) error {
-	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share && test -d /var/lib/outpost/projects`
+	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters && test -d /var/lib/outpost/projects`
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err

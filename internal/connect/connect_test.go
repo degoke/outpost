@@ -1,0 +1,68 @@
+package connect_test
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/goke/outpost/internal/config"
+	"github.com/goke/outpost/internal/connect"
+	"github.com/goke/outpost/internal/transport/mock"
+	"github.com/stretchr/testify/require"
+)
+
+func TestParseComposePorts(t *testing.T) {
+	dir := t.TempDir()
+	compose := `services:
+  web:
+    ports:
+      - "8080:80"
+      - "127.0.0.1:3000:3000"
+  api:
+    ports:
+      - 9000
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(compose), 0644))
+	proj := &config.Project{ComposeFiles: []string{"docker-compose.yml"}}
+	mappings, err := connect.ParseComposePorts(dir, proj, "")
+	require.NoError(t, err)
+	require.Len(t, mappings, 3)
+	require.Equal(t, 8080, mappings[0].HostPort)
+	require.Equal(t, 80, mappings[0].TargetPort)
+}
+
+func TestParseManualPort(t *testing.T) {
+	pm, err := connect.ParseManualPort("9090:80")
+	require.NoError(t, err)
+	require.Equal(t, 9090, pm.HostPort)
+	require.Equal(t, 80, pm.TargetPort)
+}
+
+func TestStartForwardsUsesHostPortOnRemote(t *testing.T) {
+	exec := mock.New()
+	mappings := []connect.PortMapping{{
+		Service: "web", HostPort: 8080, TargetPort: 80, BindHost: "127.0.0.1",
+	}}
+	_, closers, err := connect.StartForwards(context.Background(), exec, mappings, nil)
+	require.NoError(t, err)
+	for _, c := range closers {
+		c.Close()
+	}
+}
+
+func TestCheckLocalPortConflict(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	_, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	port := 0
+	_, err = fmt.Sscanf(portStr, "%d", &port)
+	require.NoError(t, err)
+	err = connect.CheckLocalPort("127.0.0.1", port)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already in use")
+}

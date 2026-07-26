@@ -67,6 +67,7 @@ type Volume struct {
 type OutpostDirs struct {
 	ProjectsBytes uint64 `json:"projects_bytes"`
 	ShareBytes    uint64 `json:"share_bytes"`
+	MachinesBytes uint64 `json:"machines_bytes"`
 }
 
 type Image struct {

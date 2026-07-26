@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/goke/outpost/internal/config"
 	"github.com/goke/outpost/internal/inspect"
+	"github.com/goke/outpost/internal/machine"
 	"github.com/goke/outpost/internal/transport"
 )
 
@@ -26,6 +28,7 @@ type PrunePlan struct {
 type Options struct {
 	Volumes  bool
 	Clusters bool
+	Machines bool
 	Force    bool
 }
 
@@ -72,6 +75,20 @@ func BuildPlan(ctx context.Context, exec transport.Executor, opts Options) (*Pru
 			plan.Candidates = append(plan.Candidates, Candidate{
 				Kind: "cluster", ID: line, Name: strings.TrimPrefix(line, "outpost-"),
 				Reason: "kind cluster",
+			})
+		}
+		return plan, nil
+	}
+
+	if opts.Machines {
+		stopped, err := machine.ListStoppedOutpost(ctx, exec)
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range stopped {
+			plan.Candidates = append(plan.Candidates, Candidate{
+				Kind: "machine", ID: name, Name: strings.TrimPrefix(name, "outpost-"),
+				Reason: "stopped Incus machine",
 			})
 		}
 		return plan, nil
@@ -145,6 +162,9 @@ func Execute(ctx context.Context, exec transport.Executor, plan *PrunePlan, opts
 	if opts.Clusters {
 		return executeClusters(ctx, exec, plan)
 	}
+	if opts.Machines {
+		return executeMachines(ctx, exec, plan)
+	}
 	before, _ := inspect.DockerReclaimableBytes(ctx, exec)
 	result := &Result{EstimatedBytes: plan.EstimatedBytes}
 	seen := map[string]bool{}
@@ -217,6 +237,27 @@ func executeClusters(ctx context.Context, exec transport.Executor, plan *PrunePl
 			return result, err
 		}
 		if code == 0 {
+			result.Removed = append(result.Removed, c)
+		}
+	}
+	return result, nil
+}
+
+func executeMachines(ctx context.Context, exec transport.Executor, plan *PrunePlan) (*Result, error) {
+	result := &Result{EstimatedBytes: plan.EstimatedBytes}
+	for _, c := range plan.Candidates {
+		if c.Kind != "machine" {
+			continue
+		}
+		cmd := fmt.Sprintf("incus delete %s --force", shellQuote(c.ID))
+		code, err := exec.Run(ctx, cmd, transport.RunOpts{})
+		if err != nil {
+			return result, err
+		}
+		if code == 0 {
+			display := strings.TrimPrefix(c.ID, "outpost-")
+			remoteDir := config.DefaultRemoteBase + "/machines/" + config.SanitizeMachineName(display)
+			_, _ = exec.Run(ctx, fmt.Sprintf("rm -rf %s", shellQuote(remoteDir)), transport.RunOpts{})
 			result.Removed = append(result.Removed, c)
 		}
 	}

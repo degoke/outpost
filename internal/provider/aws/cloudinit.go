@@ -24,7 +24,7 @@ echo '%s ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/outpost
 chmod 440 /etc/sudoers.d/outpost
 
 OUTPOST_BASE="/var/lib/outpost"
-mkdir -p "$OUTPOST_BASE/projects" "$OUTPOST_BASE/share" "$OUTPOST_BASE/clusters"
+mkdir -p "$OUTPOST_BASE/projects" "$OUTPOST_BASE/share" "$OUTPOST_BASE/clusters" "$OUTPOST_BASE/machines"
 chmod 755 "$OUTPOST_BASE"
 
 install_docker_debian() {

@@ -29,7 +29,7 @@ func memberAllowedPath(cmdPath string) bool {
 	case "docker", "compose", "connect", "status", "top", "capacity", "disk", "kubectl":
 		return true
 	case "prune":
-		if len(parts) >= 2 && parts[1] == "clusters" {
+		if len(parts) >= 2 && (parts[1] == "clusters" || parts[1] == "machines") {
 			return false
 		}
 		return true
@@ -40,6 +40,21 @@ func memberAllowedPath(cmdPath string) bool {
 		switch parts[1] {
 		case "list", "status":
 			return true
+		default:
+			return false
+		}
+	case "machine":
+		if len(parts) < 2 {
+			return false
+		}
+		switch parts[1] {
+		case "list", "status", "shell", "exec", "start", "stop", "restart":
+			return true
+		case "snapshot":
+			if len(parts) >= 3 && parts[2] == "create" {
+				return true
+			}
+			return false
 		default:
 			return false
 		}

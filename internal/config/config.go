@@ -231,6 +231,10 @@ func SanitizeClusterName(name string) string {
 	return SanitizeProjectName(name)
 }
 
+func SanitizeMachineName(name string) string {
+	return SanitizeProjectName(name)
+}
+
 func SanitizeProjectName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	var b strings.Builder

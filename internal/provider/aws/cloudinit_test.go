@@ -19,6 +19,7 @@ func TestCloudInitUserData(t *testing.T) {
 	require.Contains(t, script, "outpost")
 	require.Contains(t, script, "docker")
 	require.Contains(t, script, "kind")
+	require.Contains(t, script, "machines")
 }
 
 func TestCloudInitIsBase64(t *testing.T) {

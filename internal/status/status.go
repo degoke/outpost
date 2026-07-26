@@ -5,6 +5,7 @@ import (
 
 	"github.com/goke/outpost/internal/cluster"
 	"github.com/goke/outpost/internal/inspect"
+	"github.com/goke/outpost/internal/machine"
 	"github.com/goke/outpost/internal/share"
 	"github.com/goke/outpost/internal/transport"
 )
@@ -34,11 +35,13 @@ func Collect(ctx context.Context, exec transport.Executor) (*Report, error) {
 	compose, _ := inspect.ListComposeProjects(ctx, exec)
 	approved, _ := share.ApprovedCount(ctx, exec)
 	clusters, _ := cluster.Count(ctx, exec)
+	machines, _ := machine.Count(ctx, exec)
 	return &Report{
 		Host:     host,
 		Docker:   docker,
 		Compose:  compose,
 		Sharing:  SharingSummary{ApprovedDevices: approved},
 		Clusters: clusters,
+		Machines: machines,
 	}, nil
 }

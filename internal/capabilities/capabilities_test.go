@@ -35,9 +35,14 @@ func TestDetectCapabilities(t *testing.T) {
 	require.NotEmpty(t, report.Supported)
 	require.NotEmpty(t, report.Unavailable)
 	names := map[string]bool{}
+	unavail := map[string]bool{}
 	for _, c := range report.Supported {
 		names[c.Name] = true
 	}
+	for _, c := range report.Unavailable {
+		unavail[c.Name] = true
+	}
 	require.True(t, names["docker"])
 	require.True(t, names["compose"])
+	require.True(t, unavail["vm"] || names["vm"])
 }

@@ -195,7 +195,7 @@ func EnsureKubernetesTools(ctx context.Context, exec transport.Executor) error {
 }
 
 func ensureDirs(ctx context.Context, exec transport.Executor) error {
-	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters && test -d /var/lib/outpost/projects`
+	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters /var/lib/outpost/machines && test -d /var/lib/outpost/projects`
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err
@@ -204,5 +204,78 @@ func ensureDirs(ctx context.Context, exec transport.Executor) error {
 		return fmt.Errorf("could not create /var/lib/outpost directories — ensure you have write permissions or run bootstrap with sudo")
 	}
 	_ = EnsureInspectTools(ctx, exec)
+	return nil
+}
+
+const incusToolsScript = `
+set -e
+need_sudo=""
+if [ "$(id -u)" -ne 0 ]; then need_sudo="sudo"; fi
+
+detect_family() {
+  if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    case "$ID" in
+      ubuntu|debian) echo debian; return ;;
+    esac
+  fi
+  echo unknown
+}
+
+if ! command -v incus >/dev/null 2>&1; then
+  family=$(detect_family)
+  case "$family" in
+    debian)
+      $need_sudo apt-get update -qq
+      $need_sudo apt-get install -y -qq incus
+      ;;
+    *)
+      echo "OUTPOST_ERROR: unsupported distribution for Incus — install incus manually, then run again"
+      exit 1
+      ;;
+  esac
+fi
+
+if ! incus list >/dev/null 2>&1; then
+  $need_sudo incus admin init --auto
+fi
+
+current_user="${SUDO_USER:-$USER}"
+if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
+  if ! id -nG "$current_user" | grep -qw incus-admin; then
+    $need_sudo usermod -aG incus-admin "$current_user" 2>/dev/null || true
+    echo "OUTPOST_WARN: added $current_user to incus-admin group — log out and back in if incus permission errors occur"
+  fi
+fi
+`
+
+func EnsureIncus(ctx context.Context, exec transport.Executor) error {
+	code, err := exec.Run(ctx, "command -v incus >/dev/null 2>&1 && incus list >/dev/null 2>&1", transport.RunOpts{})
+	if err != nil {
+		return err
+	}
+	if code == 0 {
+		return nil
+	}
+	var stderr strings.Builder
+	code, err = exec.Run(ctx, incusToolsScript, transport.RunOpts{Stderr: &stderr})
+	out := stderr.String()
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		if strings.Contains(out, "OUTPOST_ERROR:") {
+			return fmt.Errorf("%s", strings.TrimSpace(strings.Split(out, "OUTPOST_ERROR:")[1]))
+		}
+		return fmt.Errorf("incus install failed: %s", strings.TrimSpace(out))
+	}
+	if strings.Contains(out, "OUTPOST_WARN:") {
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, "OUTPOST_WARN:") {
+				msg := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "OUTPOST_WARN:"))
+				fmt.Fprintf(os.Stderr, "warning: %s\n", msg)
+			}
+		}
+	}
 	return nil
 }

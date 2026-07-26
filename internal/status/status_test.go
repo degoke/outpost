@@ -82,6 +82,25 @@ func TestCollectStatusJSONShape(t *testing.T) {
 		Err      error
 	}{Stdout: `{"Name":"demo","Status":"running(1)"}`}
 
+	exec.Responses["kind get clusters 2>/dev/null || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["ls -1"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["incus list --format json 2>/dev/null || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: `[{"name":"outpost-dev","status":"Running","type":"container","state":{}}]`, ExitCode: 0}
+
 	report, err := status.Collect(context.Background(), exec)
 	require.NoError(t, err)
 	require.Equal(t, 4, report.Host.CPUCores)
@@ -89,5 +108,5 @@ func TestCollectStatusJSONShape(t *testing.T) {
 	require.Equal(t, 1, report.Docker.ContainersRun)
 	require.Len(t, report.Compose, 1)
 	require.Equal(t, 0, report.Clusters)
-	require.Equal(t, 0, report.Machines)
+	require.Equal(t, 1, report.Machines)
 }

@@ -3,6 +3,7 @@ package inspect
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -173,10 +174,52 @@ func ListComposeProjects(ctx context.Context, exec transport.Executor) ([]Compos
 	return ParseComposeLS(out.String())
 }
 
+func ListIncusInstanceStats(ctx context.Context, exec transport.Executor) ([]ContainerStats, error) {
+	out, err := RunOutput(ctx, exec, "incus list --format json 2>/dev/null || true")
+	if err != nil {
+		return nil, nil
+	}
+	out = strings.TrimSpace(out)
+	if out == "" || out == "[]" {
+		return nil, nil
+	}
+	var entries []struct {
+		Name  string `json:"name"`
+		Type  string `json:"type"`
+		State struct {
+			Memory struct {
+				Usage uint64 `json:"usage"`
+			} `json:"memory"`
+			Processes int `json:"processes"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return nil, nil
+	}
+	var stats []ContainerStats
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name, "outpost-") {
+			continue
+		}
+		kind := "container"
+		if strings.EqualFold(e.Type, "virtual-machine") {
+			kind = "vm"
+		}
+		stats = append(stats, ContainerStats{
+			Name:       e.Name,
+			MemUsage:   e.State.Memory.Usage,
+			MemLimit:   e.State.Memory.Usage,
+			MemPercent: 0,
+			Project:    "machine:" + kind,
+		})
+	}
+	return stats, nil
+}
+
 func CollectOutpostDirs(ctx context.Context, exec transport.Executor) (OutpostDirs, error) {
 	var d OutpostDirs
 	var out bytes.Buffer
-	cmd := fmt.Sprintf("du -sb %s/projects %s/share 2>/dev/null || true", config.DefaultRemoteBase, config.DefaultRemoteBase)
+	cmd := fmt.Sprintf("du -sb %s/projects %s/share %s/machines 2>/dev/null || true", config.DefaultRemoteBase, config.DefaultRemoteBase, config.DefaultRemoteBase)
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{Stdout: &out})
 	if err != nil || code != 0 {
 		return d, nil
@@ -190,6 +233,8 @@ func CollectOutpostDirs(ctx context.Context, exec transport.Executor) (OutpostDi
 			d.ProjectsBytes = v
 		} else if strings.Contains(line, "/share") {
 			d.ShareBytes = v
+		} else if strings.Contains(line, "/machines") {
+			d.MachinesBytes = v
 		}
 	}
 	return d, nil

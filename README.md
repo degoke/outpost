@@ -95,6 +95,8 @@ Collaborators with approved device access (role `member`) can use runtime and in
 | `status`, `top`, `capacity`, `disk`, `prune` | `init`, `invite create/list/approve/revoke` |
 | `host verify`, `host list` | `host create/start/stop/restart/resize`, `provider login` |
 | `cluster list`, `cluster status`, `kubectl` | `cluster create`, `cluster delete`, `prune clusters` |
+| `machine list`, `machine status`, `machine shell`, `machine exec`, `machine start/stop/restart` | `machine create`, `machine delete`, `prune machines` |
+| `machine snapshot create` | `machine snapshot delete` |
 
 Destructive commands (`compose down`, `docker rm`, `docker system prune`, etc.) warn when other approved devices may be affected.
 
@@ -124,6 +126,38 @@ outpost kubectl --cluster dev apply -f ./manifest.yaml
 outpost cluster delete dev
 outpost prune clusters --dry-run
 ```
+
+## Linux machines (Incus)
+
+System containers are the default — lightweight Linux environments with a shared kernel:
+
+```bash
+outpost machine create ubuntu-dev --image ubuntu:24.04
+outpost machine list
+outpost machine status ubuntu-dev
+outpost machine shell ubuntu-dev
+outpost machine exec ubuntu-dev -- uname -a
+outpost machine start ubuntu-dev
+outpost machine stop ubuntu-dev
+outpost machine snapshot create ubuntu-dev
+outpost machine delete ubuntu-dev
+outpost prune machines --dry-run
+```
+
+Hardware-virtualized VMs require KVM support on the host:
+
+```bash
+outpost host capabilities   # check vm: available/unavailable
+outpost machine create vm-dev --image ubuntu:24.04 --virtual-machine --cpu 2 --memory 4GiB --disk 20GiB
+```
+
+### VM support on cloud hosts
+
+- **Default EC2 instance types** (for example `t3.*`) do not expose KVM — use system containers instead.
+- **Bare-metal instance types** (for example `*.metal`) or hosts with [nested virtualization enabled on AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nested-virtualization.html) can run `--virtual-machine`.
+- **Adopted bare-metal or home servers** with `/dev/kvm` available support VMs when Incus is installed.
+
+If VM support is unavailable, `outpost machine create --virtual-machine` fails before creating any resources and suggests creating a system container or choosing a compatible host.
 
 ## Development
 

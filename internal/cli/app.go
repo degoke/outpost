@@ -21,6 +21,7 @@ import (
 	"github.com/goke/outpost/internal/disk"
 	"github.com/goke/outpost/internal/docker"
 	"github.com/goke/outpost/internal/host"
+	"github.com/goke/outpost/internal/machine"
 	"github.com/goke/outpost/internal/output"
 	"github.com/goke/outpost/internal/prune"
 	"github.com/goke/outpost/internal/project"
@@ -86,6 +87,7 @@ func New() *cobra.Command {
 	root.AddCommand(app.dockerCmd())
 	root.AddCommand(app.composeCmd())
 	root.AddCommand(app.clusterCmd())
+	root.AddCommand(app.machineCmd())
 	root.AddCommand(app.kubectlCmd())
 	root.AddCommand(app.connectCmd())
 	root.AddCommand(app.inviteCmd())
@@ -813,7 +815,7 @@ func (app *App) hostCapabilitiesCmd() *cobra.Command {
 		Short: "Report host runtime capabilities",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
-				report, err := capabilities.Detect(ctx, exec)
+				report, err := capabilities.DetectWithProvider(ctx, exec, h.Provider)
 				if err != nil {
 					return err
 				}
@@ -861,6 +863,12 @@ func (app *App) statusCmd() *cobra.Command {
 				}
 				if report.Sharing.ApprovedDevices > 0 {
 					app.Out.Info("Sharing: %d approved device(s)", report.Sharing.ApprovedDevices)
+				}
+				if report.Clusters > 0 {
+					app.Out.Info("Kubernetes clusters: %d", report.Clusters)
+				}
+				if report.Machines > 0 {
+					app.Out.Info("Machines: %d", report.Machines)
 				}
 				return nil
 			})
@@ -916,6 +924,306 @@ func (app *App) withClusterExecutor(run func(context.Context, transport.Executor
 		svc := &cluster.Service{Exec: exec, Out: app.Out, HostName: h.Name}
 		return run(ctx, exec, h, svc)
 	})
+}
+
+func (app *App) withMachineExecutor(run func(context.Context, transport.Executor, *config.Host, *machine.Service) error) error {
+	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+		if err := bootstrap.EnsureIncus(ctx, exec); err != nil {
+			return err
+		}
+		svc := &machine.Service{Exec: exec, Out: app.Out, HostName: h.Name}
+		return run(ctx, exec, h, svc)
+	})
+}
+
+func (app *App) machineCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "machine", Short: "Manage Incus Linux machines on the remote host"}
+	cmd.AddCommand(app.machineCreateCmd())
+	cmd.AddCommand(app.machineListCmd())
+	cmd.AddCommand(app.machineStatusCmd())
+	cmd.AddCommand(app.machineStartCmd())
+	cmd.AddCommand(app.machineStopCmd())
+	cmd.AddCommand(app.machineRestartCmd())
+	cmd.AddCommand(app.machineShellCmd())
+	cmd.AddCommand(app.machineExecCmd())
+	cmd.AddCommand(app.machineSnapshotCmd())
+	cmd.AddCommand(app.machineDeleteCmd())
+	return cmd
+}
+
+func (app *App) machineCreateCmd() *cobra.Command {
+	var image string
+	var cpu float64
+	var memory, disk string
+	var virtualMachine bool
+	cmd := &cobra.Command{
+		Use:   "create NAME",
+		Short: "Create a Linux machine (system container by default)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				if err := authz.RequireOwner(h, "machine create"); err != nil {
+					return err
+				}
+				opts := machine.CreateOptions{
+					Image:          image,
+					CPU:            cpu,
+					VirtualMachine: virtualMachine,
+				}
+				if memory != "" {
+					memBytes, err := machine.ParseSize(memory)
+					if err != nil {
+						return err
+					}
+					opts.MemoryBytes = memBytes
+				}
+				if disk != "" {
+					diskBytes, err := machine.ParseSize(disk)
+					if err != nil {
+						return err
+					}
+					opts.DiskBytes = diskBytes
+				}
+				return svc.Create(ctx, args[0], opts, h.Provider)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&image, "image", "ubuntu:24.04", "Incus image alias")
+	cmd.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores")
+	cmd.Flags().StringVar(&memory, "memory", "", "memory limit (e.g. 2GiB)")
+	cmd.Flags().StringVar(&disk, "disk", "", "root disk size (e.g. 20GiB)")
+	cmd.Flags().BoolVar(&virtualMachine, "virtual-machine", false, "create a hardware-virtualized VM (requires KVM)")
+	return cmd
+}
+
+func (app *App) machineListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List machines",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				machines, err := svc.List(ctx)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(machines)
+				}
+				if len(machines) == 0 {
+					app.Out.Info("No machines found")
+					return nil
+				}
+				for _, m := range machines {
+					app.Out.Info("%s  type=%s (%s)  status=%s  cpu=%.0f  mem=%s  disk=%s  ip=%s",
+						m.Name, m.Type, machine.TypeLabel(m.Type), m.Status, m.CPU,
+						machine.FormatSize(m.MemoryBytes), machine.FormatSize(m.DiskBytes), m.IPv4)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) machineStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status NAME",
+		Short: "Show machine status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				m, err := svc.Status(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(m)
+				}
+				app.Out.Info("Machine %s: type=%s (%s) status=%s image=%s ip=%s",
+					m.Name, m.Type, machine.TypeLabel(m.Type), m.Status, m.Image, m.IPv4)
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) machineStartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "start NAME",
+		Short: "Start a machine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.Start(ctx, args[0])
+			})
+		},
+	}
+}
+
+func (app *App) machineStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop NAME",
+		Short: "Stop a machine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.Stop(ctx, args[0])
+			})
+		},
+	}
+}
+
+func (app *App) machineRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart NAME",
+		Short: "Restart a machine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.Restart(ctx, args[0])
+			})
+		},
+	}
+}
+
+func (app *App) machineShellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell NAME",
+		Short: "Open an interactive shell in a machine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.Shell(ctx, args[0])
+			})
+		},
+	}
+}
+
+func (app *App) machineExecCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "exec NAME -- COMMAND [ARGS...]",
+		Short:              "Run a command in a machine",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("machine name is required")
+			}
+			name := args[0]
+			rest := args[1:]
+			for len(rest) > 0 && rest[0] == "--" {
+				rest = rest[1:]
+			}
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				code, err := svc.RunCommand(ctx, name, rest)
+				if err != nil {
+					return err
+				}
+				if code != 0 {
+					os.Exit(code)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) machineSnapshotCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "snapshot", Short: "Manage machine snapshots"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "create NAME [SNAPSHOT]",
+		Short: "Create a snapshot",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			snap := ""
+			if len(args) > 1 {
+				snap = args[1]
+			}
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.SnapshotCreate(ctx, args[0], snap)
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list NAME",
+		Short: "List snapshots",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				snaps, err := svc.SnapshotList(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(snaps)
+				}
+				if len(snaps) == 0 {
+					app.Out.Info("No snapshots")
+					return nil
+				}
+				for _, s := range snaps {
+					app.Out.Info("%s", s)
+				}
+				return nil
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "delete NAME SNAPSHOT",
+		Short: "Delete a snapshot",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				if err := authz.RequireOwner(h, "machine snapshot delete"); err != nil {
+					return err
+				}
+				return svc.SnapshotDelete(ctx, args[0], args[1])
+			})
+		},
+	})
+	return cmd
+}
+
+func (app *App) machineDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete NAME",
+		Short: "Delete a machine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				if err := authz.RequireOwner(h, "machine delete"); err != nil {
+					return err
+				}
+				info, err := svc.DeleteInfo(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				count, _ := share.ApprovedCount(ctx, exec)
+				if err := authz.ConfirmDestructive(count, "machine delete", app.ForceYes); err != nil {
+					return err
+				}
+				if !app.ForceYes {
+					m, _ := svc.Status(ctx, args[0])
+					msg := fmt.Sprintf("This will permanently delete the machine and %s of disk data", machine.FormatSize(info.DiskBytes))
+					if info.SnapshotCount > 0 {
+						msg += fmt.Sprintf(" plus %d snapshot(s)", info.SnapshotCount)
+						if info.SnapshotBytes > 0 {
+							msg += fmt.Sprintf(" (~%s)", machine.FormatSize(info.SnapshotBytes))
+						}
+					}
+					if m != nil && m.Type == machine.TypeVM {
+						msg += " (virtual machine disks may be larger than configured limits)"
+					}
+					if err := authz.ConfirmPrompt(msg); err != nil {
+						return err
+					}
+				}
+				if err := svc.Delete(ctx, args[0]); err != nil {
+					return err
+				}
+				app.Out.Success("Deleted machine %q", args[0])
+				return nil
+			})
+		},
+	}
 }
 
 func (app *App) clusterCmd() *cobra.Command {
@@ -1090,6 +1398,9 @@ func (app *App) diskCmd() *cobra.Command {
 					app.Out.Info("Docker %s: %s (reclaimable %s)", row.Type, row.Size, row.Reclaimable)
 				}
 				app.Out.Info("Outpost projects: %s", formatBytes(report.Outpost.ProjectsBytes))
+				if report.Outpost.MachinesBytes > 0 {
+					app.Out.Info("Outpost machines: %s", formatBytes(report.Outpost.MachinesBytes))
+				}
 				app.Out.Info("Reclaimable: %d stopped containers, %d dangling images, %d unused networks",
 					report.Reclaimable.StoppedContainers, report.Reclaimable.DanglingImages,
 					report.Reclaimable.UnusedNetworks)
@@ -1133,6 +1444,16 @@ func (app *App) pruneCmd() *cobra.Command {
 	clustersCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
 	clustersCmd.Flags().BoolVar(&force, "force", false, "skip confirmation when used with --yes")
 	cmd.AddCommand(clustersCmd)
+	machinesCmd := &cobra.Command{
+		Use:   "machines",
+		Short: "Prune stopped Incus machines (explicit, owner only)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.runPruneMachines(dryRun, force)
+		},
+	}
+	machinesCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
+	machinesCmd.Flags().BoolVar(&force, "force", false, "skip confirmation when used with --yes")
+	cmd.AddCommand(machinesCmd)
 	return cmd
 }
 
@@ -1170,6 +1491,44 @@ func (app *App) runPruneClusters(dryRun, force bool) error {
 			return app.Out.PrintJSON(result)
 		}
 		app.Out.Success("Pruned %d cluster(s)", len(result.Removed))
+		return nil
+	})
+}
+
+func (app *App) runPruneMachines(dryRun, force bool) error {
+	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+		if err := authz.RequireOwner(h, "prune machines"); err != nil {
+			return err
+		}
+		opts := prune.Options{Machines: true, Force: force}
+		plan, err := prune.BuildPlan(ctx, exec, opts)
+		if err != nil {
+			return err
+		}
+		if dryRun {
+			if app.Out.JSON {
+				return app.Out.PrintJSON(plan)
+			}
+			for _, c := range plan.Candidates {
+				app.Out.Info("[%s] %s %s — %s", c.Kind, c.ID, c.Name, c.Reason)
+			}
+			return nil
+		}
+		count, _ := share.ApprovedCount(ctx, exec)
+		if err := authz.ConfirmDestructive(count, "prune machines", app.ForceYes); err != nil {
+			return err
+		}
+		if !app.ForceYes && !force {
+			return fmt.Errorf("aborted — re-run with --yes to confirm machine prune")
+		}
+		result, err := prune.Execute(ctx, exec, plan, opts)
+		if err != nil {
+			return err
+		}
+		if app.Out.JSON {
+			return app.Out.PrintJSON(result)
+		}
+		app.Out.Success("Pruned %d machine(s)", len(result.Removed))
 		return nil
 	})
 }

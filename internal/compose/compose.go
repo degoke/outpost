@@ -41,6 +41,11 @@ func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uplo
 			return 1, err
 		}
 	}
+	if subcommand == "up" {
+		if err := CheckComposeCapacity(ctx, r.Exec, r.Cwd, r.Project); err != nil {
+			return 1, err
+		}
+	}
 	cmd := r.buildCmd(subcommand, args)
 	opts := transport.RunOpts{
 		WorkDir: r.Project.RemoteDir,

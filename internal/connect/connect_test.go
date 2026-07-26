@@ -66,3 +66,30 @@ func TestCheckLocalPortConflict(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already in use")
 }
+
+func TestEnsureNoActiveSessionStale(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	host, project := "personal", "demo"
+	sess := &connect.Session{
+		Host: host, Project: project, PID: 999999999,
+	}
+	require.NoError(t, connect.SaveSession(sess))
+	require.NoError(t, connect.EnsureNoActiveSession(host, project))
+	_, err := connect.LoadSession(host, project)
+	require.Error(t, err)
+}
+
+func TestEnsureNoActiveSessionBlocksLive(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	host, project := "personal", "demo"
+	sess := &connect.Session{
+		Host: host, Project: project, PID: os.Getpid(),
+	}
+	require.NoError(t, connect.SaveSession(sess))
+	err := connect.EnsureNoActiveSession(host, project)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already active")
+}
+

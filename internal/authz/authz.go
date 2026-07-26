@@ -85,11 +85,3 @@ func isTerminal() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-func MemberAllowedCommand(cmd string) bool {
-	switch cmd {
-	case "docker", "compose", "connect", "host verify":
-		return true
-	default:
-		return false
-	}
-}

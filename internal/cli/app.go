@@ -6,19 +6,26 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/goke/outpost/internal/authz"
 	"github.com/goke/outpost/internal/bootstrap"
+	"github.com/goke/outpost/internal/capabilities"
+	"github.com/goke/outpost/internal/capacity"
 	"github.com/goke/outpost/internal/compose"
 	"github.com/goke/outpost/internal/config"
 	"github.com/goke/outpost/internal/connect"
+	"github.com/goke/outpost/internal/disk"
 	"github.com/goke/outpost/internal/docker"
 	"github.com/goke/outpost/internal/host"
 	"github.com/goke/outpost/internal/output"
+	"github.com/goke/outpost/internal/prune"
 	"github.com/goke/outpost/internal/project"
 	"github.com/goke/outpost/internal/share"
+	"github.com/goke/outpost/internal/status"
+	"github.com/goke/outpost/internal/top"
 	"github.com/goke/outpost/internal/transport"
 	"github.com/spf13/cobra"
 )
@@ -50,6 +57,17 @@ func New() *cobra.Command {
 			app.Out = output.New(jsonOut, debug)
 			app.HostFlag, _ = cmd.Flags().GetString("host")
 			app.ForceYes, _ = cmd.Flags().GetBool("yes")
+			hostName := app.HostFlag
+			if hostName == "" {
+				hostName = g.ActiveHost
+			}
+			var h *config.Host
+			if hostName != "" {
+				h, _ = g.ResolveHost(hostName)
+			}
+			if err := authz.RequireMemberAllowed(h, commandPath(cmd)); err != nil {
+				return err
+			}
 			return nil
 		},
 		SilenceUsage:  true,
@@ -67,8 +85,25 @@ func New() *cobra.Command {
 	root.AddCommand(app.composeCmd())
 	root.AddCommand(app.connectCmd())
 	root.AddCommand(app.inviteCmd())
+	root.AddCommand(app.statusCmd())
+	root.AddCommand(app.topCmd())
+	root.AddCommand(app.capacityCmd())
+	root.AddCommand(app.diskCmd())
+	root.AddCommand(app.pruneCmd())
 
 	return root
+}
+
+func commandPath(cmd *cobra.Command) string {
+	var parts []string
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Use == "" || c.Use == "outpost" {
+			continue
+		}
+		use := strings.Fields(c.Use)[0]
+		parts = append([]string{use}, parts...)
+	}
+	return strings.Join(parts, " ")
 }
 
 func mustCwd() string {
@@ -138,6 +173,7 @@ func (app *App) hostCmd() *cobra.Command {
 	cmd.AddCommand(app.hostVerifyCmd())
 	cmd.AddCommand(app.hostRemoveCmd())
 	cmd.AddCommand(app.hostDestroyCmd())
+	cmd.AddCommand(app.hostCapabilitiesCmd())
 	return cmd
 }
 
@@ -276,6 +312,12 @@ func (app *App) dockerCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				if docker.IsDestructive(args) {
+					count, _ := share.ApprovedCount(ctx, exec)
+					if err := authz.ConfirmDestructive(count, docker.ActionLabel(args), app.ForceYes); err != nil {
+						return err
+					}
+				}
 				code, err := docker.Run(ctx, exec, args)
 				if err != nil {
 					return err
@@ -360,6 +402,9 @@ func (app *App) connectCmd() *cobra.Command {
 
 func (app *App) connectStart(service string, localPortOverride int, portSpecs []string) error {
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+		if err := connect.EnsureNoActiveSession(h.Name, proj.Name); err != nil {
+			return err
+		}
 		mappings, err := connect.ParseComposePorts(app.Cwd, proj, service)
 		if err != nil && len(portSpecs) == 0 {
 			return err
@@ -416,7 +461,7 @@ func (app *App) connectStatus() error {
 		return err
 	}
 	hostName := app.resolveHostName(proj)
-	sess, err := connect.LoadSession(hostName, proj.Name)
+	sess, err := connect.LoadActiveSession(hostName, proj.Name)
 	if err != nil {
 		app.Out.Info("No active forwarding session")
 		return nil
@@ -630,4 +675,250 @@ func (app *App) inviteRevokeCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+func (app *App) hostCapabilitiesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "capabilities",
+		Short: "Report host runtime capabilities",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				report, err := capabilities.Detect(ctx, exec)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(report)
+				}
+				for _, c := range report.Supported {
+					app.Out.Info("%s: %s", c.Name, c.Status)
+				}
+				for _, c := range report.Unavailable {
+					app.Out.Info("%s: %s (%s)", c.Name, c.Status, c.Reason)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) statusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show host and workload status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				report, err := status.Collect(ctx, exec)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(report)
+				}
+				app.Out.Info("Host %s: %d CPU cores (%.1f%%), memory %s/%s, disk %s/%s, uptime %s",
+					h.Name, report.Host.CPUCores, report.Host.CPUUsagePercent,
+					formatBytes(report.Host.MemoryUsed), formatBytes(report.Host.MemoryTotal),
+					formatBytes(report.Host.DiskUsed), formatBytes(report.Host.DiskTotal),
+					formatDuration(report.Host.UptimeSeconds))
+				if report.Docker.Healthy {
+					app.Out.Info("Docker: healthy — %d running, %d stopped containers",
+						report.Docker.ContainersRun, report.Docker.ContainersStop)
+				} else {
+					app.Out.Info("Docker: unavailable")
+				}
+				for _, p := range report.Compose {
+					app.Out.Info("Compose project %s: %s", p.Name, p.Status)
+				}
+				if report.Sharing.ApprovedDevices > 0 {
+					app.Out.Info("Sharing: %d approved device(s)", report.Sharing.ApprovedDevices)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) topCmd() *cobra.Command {
+	var watch bool
+	cmd := &cobra.Command{
+		Use:   "top",
+		Short: "Show live container resource usage",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				if watch {
+					return top.RunWatch(ctx, exec, app.Out.Stdout, 2*time.Second)
+				}
+				return top.RunOnce(ctx, exec, app.Out.Stdout)
+			})
+		},
+	}
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "refresh continuously")
+	return cmd
+}
+
+func (app *App) capacityCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "capacity",
+		Short: "Show available host capacity and recommendations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				report, err := capacity.Collect(ctx, exec)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(report)
+				}
+				app.Out.Info("Available: %.1f CPU cores, %s memory, %s disk",
+					report.AvailableCPU, formatBytes(report.AvailableMem), formatBytes(report.AvailableDisk))
+				app.Out.Info("%s", report.Recommendation)
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) diskCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disk",
+		Short: "Show disk usage and reclaimable space",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+				report, err := disk.Collect(ctx, exec)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(report)
+				}
+				app.Out.Info("Filesystem: %s used / %s (%.1f%%)",
+					formatBytes(report.Filesystem.UsedBytes), formatBytes(report.Filesystem.TotalBytes),
+					report.Filesystem.UsedPercent)
+				for _, row := range report.Docker.DiskUsage {
+					app.Out.Info("Docker %s: %s (reclaimable %s)", row.Type, row.Size, row.Reclaimable)
+				}
+				app.Out.Info("Outpost projects: %s", formatBytes(report.Outpost.ProjectsBytes))
+				app.Out.Info("Reclaimable: %d stopped containers, %d dangling images, %d unused networks",
+					report.Reclaimable.StoppedContainers, report.Reclaimable.DanglingImages,
+					report.Reclaimable.UnusedNetworks)
+				if report.Reclaimable.UploadArtifacts != "" {
+					app.Out.Info("Upload artifacts: %s", report.Reclaimable.UploadArtifacts)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) pruneCmd() *cobra.Command {
+	var dryRun, volumes, force bool
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Safely reclaim disk space on the remote host",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.runPrune(dryRun, volumes, force)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
+	cmd.Flags().BoolVar(&force, "force", false, "skip volume name confirmation when used with --yes")
+	volumesCmd := &cobra.Command{
+		Use:   "volumes",
+		Short: "Prune unused named volumes (explicit)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.runPrune(dryRun, true, force)
+		},
+	}
+	volumesCmd.Flags().BoolVar(&dryRun, "dry-run", false, "list cleanup candidates without making changes")
+	volumesCmd.Flags().BoolVar(&force, "force", false, "skip volume name confirmation when used with --yes")
+	cmd.AddCommand(volumesCmd)
+	return cmd
+}
+
+func (app *App) runPrune(dryRun, volumes, force bool) error {
+	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+		opts := prune.Options{Volumes: volumes, Force: force}
+		plan, err := prune.BuildPlan(ctx, exec, opts)
+		if err != nil {
+			return err
+		}
+		if dryRun {
+			if app.Out.JSON {
+				return app.Out.PrintJSON(plan)
+			}
+			for _, c := range plan.Candidates {
+				app.Out.Info("[%s] %s %s — %s", c.Kind, c.ID, c.Name, c.Reason)
+			}
+			app.Out.Info("Protected: %s", plan.ProtectedNote)
+			return nil
+		}
+		count, _ := share.ApprovedCount(ctx, exec)
+		label := "prune"
+		if volumes {
+			label = "prune volumes"
+		}
+		if err := authz.ConfirmDestructive(count, label, app.ForceYes); err != nil {
+			return err
+		}
+		if volumes && !app.ForceYes {
+			var names []string
+			for _, c := range plan.Candidates {
+				if c.Kind == "volume" {
+					names = append(names, c.Name)
+				}
+			}
+			if len(names) > 0 {
+				app.Out.Info("Volumes to remove: %s", strings.Join(names, ", "))
+			}
+			return fmt.Errorf("aborted — re-run with --yes to confirm volume prune")
+		}
+		if volumes && !force {
+			var names []string
+			for _, c := range plan.Candidates {
+				if c.Kind == "volume" {
+					names = append(names, c.Name)
+				}
+			}
+			if len(names) > 0 {
+				app.Out.Info("Volumes to remove: %s", strings.Join(names, ", "))
+			}
+		}
+		result, err := prune.Execute(ctx, exec, plan, opts)
+		if err != nil {
+			return err
+		}
+		if app.Out.JSON {
+			return app.Out.PrintJSON(result)
+		}
+		app.Out.Success("Pruned %d resource(s)", len(result.Removed))
+		if result.ReclaimedBytes > 0 {
+			app.Out.Info("Reclaimed approximately %s", formatBytes(uint64(result.ReclaimedBytes)))
+		}
+		return nil
+	})
+}
+
+func formatDuration(seconds uint64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if seconds < 3600 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	if seconds < 86400 {
+		return fmt.Sprintf("%dh", seconds/3600)
+	}
+	return fmt.Sprintf("%dd", seconds/86400)
+}
+
+func formatBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
 }

@@ -134,6 +134,28 @@ func checkDocker(ctx context.Context, exec transport.Executor) (bool, error) {
 	return code == 0, nil
 }
 
+// EnsureInspectTools verifies basic host inspection utilities are available.
+func EnsureInspectTools(ctx context.Context, exec transport.Executor) error {
+	cmd := `command -v free >/dev/null && command -v df >/dev/null && command -v du >/dev/null`
+	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		install := `
+need_sudo=""
+if [ "$(id -u)" -ne 0 ]; then need_sudo="sudo"; fi
+if command -v apt-get >/dev/null 2>&1; then
+  $need_sudo apt-get update -qq && $need_sudo apt-get install -y -qq procps coreutils
+elif command -v yum >/dev/null 2>&1; then
+  $need_sudo yum install -y -q procps-ng coreutils
+fi
+`
+		_, _ = exec.Run(ctx, install, transport.RunOpts{})
+	}
+	return nil
+}
+
 func ensureDirs(ctx context.Context, exec transport.Executor) error {
 	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share && test -d /var/lib/outpost/projects`
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
@@ -143,5 +165,6 @@ func ensureDirs(ctx context.Context, exec transport.Executor) error {
 	if code != 0 {
 		return fmt.Errorf("could not create /var/lib/outpost directories — ensure you have write permissions or run bootstrap with sudo")
 	}
+	_ = EnsureInspectTools(ctx, exec)
 	return nil
 }

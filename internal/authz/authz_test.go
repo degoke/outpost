@@ -25,5 +25,19 @@ func TestDenyProviderAndDestroy(t *testing.T) {
 
 func TestMemberAllowedCommands(t *testing.T) {
 	require.True(t, authz.MemberAllowedCommand("docker"))
-	require.False(t, authz.MemberAllowedCommand("invite create"))
+	require.True(t, authz.MemberAllowedCommand("status"))
+	require.False(t, authz.MemberAllowedCommand("init"))
+}
+
+func TestRequireMemberAllowed(t *testing.T) {
+	owner := &config.Host{Role: config.RoleOwner}
+	member := &config.Host{Role: config.RoleMember}
+	require.NoError(t, authz.RequireMemberAllowed(owner, "host add"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "docker"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "host verify"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "invite join"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "prune volumes"))
+	require.Error(t, authz.RequireMemberAllowed(member, "host add"))
+	require.Error(t, authz.RequireMemberAllowed(member, "init"))
+	require.Error(t, authz.RequireMemberAllowed(member, "invite create"))
 }

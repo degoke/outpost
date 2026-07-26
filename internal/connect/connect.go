@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/goke/outpost/internal/config"
@@ -179,6 +180,44 @@ func CheckLocalPort(host string, port int) error {
 	return nil
 }
 
+func IsProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// LoadActiveSession returns the session if present and the forwarding process is alive.
+// Stale session files are removed automatically.
+func LoadActiveSession(host, project string) (*Session, error) {
+	sess, err := LoadSession(host, project)
+	if err != nil {
+		return nil, err
+	}
+	if !IsProcessAlive(sess.PID) {
+		_ = RemoveSession(host, project)
+		return nil, fmt.Errorf("no active forwarding session")
+	}
+	return sess, nil
+}
+
+func EnsureNoActiveSession(host, project string) error {
+	sess, err := LoadSession(host, project)
+	if err != nil {
+		return nil
+	}
+	if IsProcessAlive(sess.PID) {
+		return fmt.Errorf("forwarding session already active for %s/%s — run 'outpost connect --down' first", host, project)
+	}
+	_ = RemoveSession(host, project)
+	return nil
+}
+
 func SessionPath(host, project string) (string, error) {
 	dir, err := config.SessionsDir()
 	if err != nil {
@@ -282,7 +321,7 @@ func StopSession(host, project string) error {
 	if err != nil {
 		return fmt.Errorf("no active forwarding session for %s/%s", host, project)
 	}
-	if sess.PID > 0 {
+	if sess.PID > 0 && IsProcessAlive(sess.PID) {
 		proc, err := os.FindProcess(sess.PID)
 		if err == nil {
 			_ = proc.Signal(os.Interrupt)

@@ -13,6 +13,8 @@ Use an existing Linux server or let Outpost provision one on AWS. Share the host
 - **Remote mirror** — sync your repo and run commands on the host; detached tmux sessions survive disconnects.
 - **Team sharing** — invite collaborators with device approval; owners keep control of the host and cloud account.
 
+
+
 ## How it works
 
 You install the Outpost CLI locally. It connects to your host over SSH, installs missing tools on first use, syncs project files, and runs commands remotely. There is no Outpost agent running on the server.
@@ -39,14 +41,20 @@ go install github.com/goke/outpost/cmd/outpost@latest
 
 ## Requirements
 
-| | |
-|---|---|
-| **Your machine** | Outpost CLI, SSH client, network access to the host |
-| **Remote host** | Linux with SSH; `sudo` for first-time setup |
+
+|                       |                                                               |
+| --------------------- | ------------------------------------------------------------- |
+| **Your machine**      | Outpost CLI, SSH client, network access to the host           |
+| **Remote host**       | Linux with SSH; `sudo` for first-time setup                   |
 | **Supported distros** | Debian/Ubuntu, Amazon Linux, RHEL, CentOS, Rocky, and similar |
-| **AWS (optional)** | Configured AWS CLI profile with EC2 permissions |
+| **AWS (optional)**    | Configured AWS CLI profile with EC2 permissions               |
+
+
+
 
 ## Getting started
+
+
 
 ### Use an existing server
 
@@ -88,6 +96,8 @@ outpost connect
 Outpost creates the EC2 instance, configures SSH, installs Docker, and registers the host. You can start, stop, resize, or destroy it with `outpost host` commands.
 
 ## Day-to-day usage
+
+
 
 ### Hosts
 
@@ -171,6 +181,8 @@ outpost compose volumes import
 outpost compose up -d
 ```
 
+
+
 ### Port forwarding
 
 ```bash
@@ -200,12 +212,16 @@ outpost invite join CODE --hostname 203.0.113.10 --user ubuntu --label my-laptop
 
 Members can run workloads (`docker`, `compose`, `connect`, `kubectl`, etc.) but cannot create or destroy hosts, manage invitations, or use cloud provider commands. Destructive operations warn when other teammates may be affected.
 
-| Members can | Members cannot |
-|-------------|----------------|
-| `docker`, `compose`, `connect` | Manage hosts or invitations |
+
+| Members can                                  | Members cannot                                  |
+| -------------------------------------------- | ----------------------------------------------- |
+| `docker`, `compose`, `connect`               | Manage hosts or invitations                     |
 | `status`, `top`, `capacity`, `disk`, `prune` | `init`, `host create/destroy`, `provider login` |
-| `cluster list`, `kubectl` | `cluster create/delete` |
-| `machine shell`, `machine exec` | `machine create/delete` |
+| `cluster list`, `kubectl`                    | `cluster create/delete`                         |
+| `machine shell`, `machine exec`              | `machine create/delete`                         |
+
+
+
 
 ## AWS host management
 
@@ -239,10 +255,23 @@ Local manifest files are uploaded automatically when you apply them.
 
 ## Linux machines
 
-System containers are lightweight and work on most hosts, including standard EC2 instances:
+System containers are lightweight and work on most hosts, including standard EC2 instances. Defaults are minimal — sized for quick test environments on small VPS plans. Increase resources with `--cpu`, `--memory`, and `--disk` when you need more:
+
+
+| Resource | Container default | VM default |
+| -------- | ----------------- | ---------- |
+| CPU      | 0.5 core          | 1 core     |
+| Memory   | 128 MiB           | 256 MiB    |
+| Disk     | 2 GiB             | 3 GiB      |
+
+
+**Containers vs VMs:** A **system container** shares the host Linux kernel (like a very isolated chroot). It starts fast, uses little RAM, and works on almost any Linux host — this is the default. A **VM** runs a full guest kernel via KVM with stronger isolation, but needs more resources and only works when the host has KVM (bare metal, metal EC2, or nested virtualization). Use containers for everyday dev/test; use VMs when you need a real kernel or kernel modules.
+
+Outpost checks host capacity **before** creating a machine. If the host is low on resources, the command fails with available amounts — run `outpost capacity` to inspect the host, or request a smaller machine.
 
 ```bash
 outpost machine create ubuntu-dev --image ubuntu:24.04
+outpost machine create big-dev --image ubuntu:24.04 --cpu 2 --memory 2GiB --disk 20GiB
 outpost machine shell ubuntu-dev
 outpost machine exec ubuntu-dev -- uname -a
 outpost machine stop ubuntu-dev
@@ -250,12 +279,14 @@ outpost machine snapshot create ubuntu-dev
 outpost machine delete ubuntu-dev
 ```
 
-**Virtual machines** need KVM. They work on bare-metal servers, metal EC2 instance types, or hosts with [nested virtualization](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nested-virtualization.html). Standard `t3.*` instances do not support VMs — use system containers instead.
+**Virtual machines** need KVM. They work on bare-metal servers, metal EC2 instance types, or hosts with [nested virtualization](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nested-virtualization.html). Standard `t3.`* instances do not support VMs — use system containers instead. VMs typically need more memory than the default; set `--memory` explicitly.
 
 ```bash
 outpost host capabilities
-outpost machine create vm-dev --image ubuntu:24.04 --virtual-machine --cpu 2 --memory 4GiB --disk 20GiB
+outpost machine create vm-dev --image ubuntu:24.04 --virtual-machine --cpu 2 --memory 2GiB --disk 20GiB
 ```
+
+
 
 ## Monitoring and cleanup
 
@@ -271,14 +302,18 @@ outpost prune           # remove stopped containers, unused images, build cache
 outpost prune volumes   # explicit: unused named volumes
 ```
 
+
+
 ## Configuration
 
 Outpost stores two kinds of configuration:
 
-| Location | Purpose |
-|----------|---------|
-| `~/.outpost/config.yaml` | Registered hosts, active host, AWS defaults |
-| `.outpost/project.yaml` | Per-repo project name, host, and compose files |
+
+| Location                 | Purpose                                        |
+| ------------------------ | ---------------------------------------------- |
+| `~/.outpost/config.yaml` | Registered hosts, active host, AWS defaults    |
+| `.outpost/project.yaml`  | Per-repo project name, host, and compose files |
+
 
 Example project config (created by `outpost init`):
 
@@ -296,20 +331,27 @@ Use the same project name across your team so everyone targets the same remote s
 
 These flags work on every command:
 
-| Flag | Description |
-|------|-------------|
+
+| Flag          | Description                                   |
+| ------------- | --------------------------------------------- |
 | `--host NAME` | Use a specific host instead of the active one |
-| `--json` | JSON output |
-| `--debug` | Verbose logging |
-| `--yes` | Skip confirmation prompts |
+| `--json`      | JSON output                                   |
+| `--debug`     | Verbose logging                               |
+| `--yes`       | Skip confirmation prompts                     |
+
+
+
 
 ## Troubleshooting
 
-| Problem | What to try |
-|---------|-------------|
-| SSH connection fails | Test with `ssh user@host`. Check hostname, user, port, and key. Pass `--identity-file` to `host add` if needed. |
-| Bootstrap fails | Ensure your user has `sudo` on the host. On unsupported distros, install Docker manually, then run `outpost host verify`. |
-| Port forwarding conflict | Run `outpost connect --status`. Use `--local-port` or `--port` to pick a different local port. |
-| Member access denied | Owner runs `outpost invite list` and approves the device. |
-| Not enough resources | Run `outpost capacity` before creating stacks, clusters, or machines. |
-| Start over locally | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept. |
+
+| Problem                  | What to try                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| SSH connection fails     | Test with `ssh user@host`. Check hostname, user, port, and key. Pass `--identity-file` to `host add` if needed.           |
+| Bootstrap fails          | Ensure your user has `sudo` on the host. On unsupported distros, install Docker manually, then run `outpost host verify`. |
+| Port forwarding conflict | Run `outpost connect --status`. Use `--local-port` or `--port` to pick a different local port.                            |
+| Member access denied     | Owner runs `outpost invite list` and approves the device.                                                                 |
+| Not enough resources     | Run `outpost capacity` before creating stacks, clusters, or machines.                                                     |
+| Start over locally       | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept.        |
+
+

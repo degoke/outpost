@@ -45,6 +45,25 @@ func TestCreateRejectsInsufficientCapacity(t *testing.T) {
 	svc := &machine.Service{Exec: exec}
 	err := svc.Create(context.Background(), "dev", machine.CreateOptions{Image: "ubuntu:24.04", CPU: 16, MemoryBytes: 64 * 1024 * 1024 * 1024}, nil)
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "outpost capacity")
+	require.False(t, exec.HasCommand("incus launch"))
+}
+
+func TestCreateRejectsInsufficientCapacityBeforeIncusInstall(t *testing.T) {
+	exec := mock.New()
+	exec.Responses["command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1"] = mockResp(0, "")
+	exec.Responses["command -v incus >/dev/null 2>&1 && incus list >/dev/null 2>&1"] = mockResp(1, "")
+	exec.Responses["nproc"] = mockResp(0, "2\n")
+	exec.Responses["free -b | head -2"] = mockResp(0, "              total        used        free      shared  buff/cache   available\nMem:    2040109465  1395864371   432345678           0   211812416   432345678\n")
+	exec.Responses["df -B1 / | tail -1"] = mockResp(0, "/dev/root 100000000000 10000000000 90000000000 10% /\n")
+	exec.Responses["head -1 /proc/stat"] = mockResp(0, "cpu  100 0 50 8500 0 0 0 0 0 0\n")
+	exec.Responses["docker stats --no-stream --format '{{json .}}'"] = mockResp(0, "")
+
+	svc := &machine.Service{Exec: exec}
+	err := svc.Create(context.Background(), "dev", machine.CreateOptions{Image: "ubuntu:24.04", MemoryBytes: 1 * 1024 * 1024 * 1024}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "insufficient memory")
+	require.False(t, exec.HasCommand("apt-get install"))
 	require.False(t, exec.HasCommand("incus launch"))
 }
 

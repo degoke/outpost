@@ -10,12 +10,12 @@ const (
 	TypeContainer = "container"
 	TypeVM        = "vm"
 
-	defaultContainerCPU   = 1
-	defaultContainerMem   = uint64(1 * 1024 * 1024 * 1024)
-	defaultContainerDisk  = uint64(10 * 1024 * 1024 * 1024)
-	defaultVMCPU          = 2
-	defaultVMMem          = uint64(2 * 1024 * 1024 * 1024)
-	defaultVMDisk         = uint64(20 * 1024 * 1024 * 1024)
+	defaultContainerCPU   = 0.5
+	defaultContainerMem   = uint64(128 * 1024 * 1024)
+	defaultContainerDisk  = uint64(2 * 1024 * 1024 * 1024)
+	defaultVMCPU          = 1
+	defaultVMMem          = uint64(256 * 1024 * 1024)
+	defaultVMDisk         = uint64(3 * 1024 * 1024 * 1024)
 	defaultImageContainer = "ubuntu:24.04"
 )
 

@@ -86,15 +86,15 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 		}
 	}
 
+	cpu, mem, disk := EstimateResources(opts)
+	if err := capacity.Check(ctx, s.Exec, capacity.Request{CPUCores: cpu, MemoryBytes: mem, DiskBytes: disk}); err != nil {
+		return fmt.Errorf("%w; use --memory, --cpu, or --disk to request less, or run 'outpost capacity' to inspect the host", err)
+	}
+
 	if err := bootstrap.Ensure(ctx, s.Exec); err != nil {
 		return err
 	}
 	if err := bootstrap.EnsureIncus(ctx, s.Exec); err != nil {
-		return err
-	}
-
-	cpu, mem, disk := EstimateResources(opts)
-	if err := capacity.Check(ctx, s.Exec, capacity.Request{CPUCores: cpu, MemoryBytes: mem, DiskBytes: disk}); err != nil {
 		return err
 	}
 

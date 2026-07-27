@@ -1358,7 +1358,7 @@ func (app *App) machineCreateCmd() *cobra.Command {
 		Short: "Create a Linux machine (system container by default)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
 				if err := authz.RequireOwner(h, "machine create"); err != nil {
 					return err
 				}
@@ -1381,14 +1381,15 @@ func (app *App) machineCreateCmd() *cobra.Command {
 					}
 					opts.DiskBytes = diskBytes
 				}
+				svc := &machine.Service{Exec: exec, Out: app.Out, HostName: h.Name}
 				return svc.Create(ctx, args[0], opts, h.Provider)
 			})
 		},
 	}
 	cmd.Flags().StringVar(&image, "image", "ubuntu:24.04", "Incus image alias")
-	cmd.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores")
-	cmd.Flags().StringVar(&memory, "memory", "", "memory limit (e.g. 2GiB)")
-	cmd.Flags().StringVar(&disk, "disk", "", "root disk size (e.g. 20GiB)")
+	cmd.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores (default: 0.5 container, 1 VM)")
+	cmd.Flags().StringVar(&memory, "memory", "", "memory limit (default: 128MiB container, 256MiB VM; e.g. 2GiB)")
+	cmd.Flags().StringVar(&disk, "disk", "", "root disk size (default: 2GiB container, 3GiB VM; e.g. 20GiB)")
 	cmd.Flags().BoolVar(&virtualMachine, "virtual-machine", false, "create a hardware-virtualized VM (requires KVM)")
 	return cmd
 }

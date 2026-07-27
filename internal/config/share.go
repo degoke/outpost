@@ -1,12 +1,12 @@
 package config
 
 import (
-	"time"
 	"strings"
+	"time"
 )
 
 const (
-	ShareManifestPath      = "/var/lib/outpost/share/manifest.yaml"
+	ShareManifestPath       = "/var/lib/outpost/share/manifest.yaml"
 	ShareAuthorizedKeysPath = "/var/lib/outpost/share/authorized_keys"
 )
 

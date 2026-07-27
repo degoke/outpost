@@ -6,9 +6,9 @@ import (
 )
 
 type KindConfig struct {
-	Name           string
-	ControlPlanes  int
-	Workers        int
+	Name          string
+	ControlPlanes int
+	Workers       int
 }
 
 func RenderKindConfig(cfg KindConfig) string {

@@ -23,7 +23,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 install_docker_debian() {
-  if command -v docker >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return 0
   fi
   $need_sudo apt-get update -qq
@@ -36,7 +36,7 @@ install_docker_debian() {
 }
 
 install_docker_rhel() {
-  if command -v docker >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return 0
   fi
   $need_sudo yum install -y -q yum-utils
@@ -72,9 +72,12 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 $need_sudo mkdir -p "$OUTPOST_BASE/projects" "$OUTPOST_BASE/share"
+current_user="${SUDO_USER:-$USER}"
+if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
+  $need_sudo chown -R "$current_user:$current_user" "$OUTPOST_BASE"
+fi
 $need_sudo chmod 755 "$OUTPOST_BASE"
 
-current_user="${SUDO_USER:-$USER}"
 if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
   if ! id -nG "$current_user" | grep -qw docker; then
     $need_sudo usermod -aG docker "$current_user" 2>/dev/null || true
@@ -195,7 +198,7 @@ func EnsureKubernetesTools(ctx context.Context, exec transport.Executor) error {
 }
 
 func ensureDirs(ctx context.Context, exec transport.Executor) error {
-	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters /var/lib/outpost/machines && test -d /var/lib/outpost/projects`
+	cmd := `mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters /var/lib/outpost/machines && (chown -R "$USER:$USER" /var/lib/outpost 2>/dev/null || sudo chown -R "$USER:$USER" /var/lib/outpost) && test -d /var/lib/outpost/projects`
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err

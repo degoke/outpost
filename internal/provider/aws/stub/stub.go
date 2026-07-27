@@ -16,12 +16,12 @@ import (
 type EC2 struct {
 	mu sync.Mutex
 
-	nextSGID  atomic.Int32
-	nextInst  atomic.Int32
-	nextVol   atomic.Int32
+	nextSGID atomic.Int32
+	nextInst atomic.Int32
+	nextVol  atomic.Int32
 
-	AMIID         string
-	DefaultVPC    string
+	AMIID          string
+	DefaultVPC     string
 	SecurityGroups map[string]*ec2types.SecurityGroup
 	Instances      map[string]*ec2types.Instance
 	Volumes        map[string]bool
@@ -129,11 +129,11 @@ func (s *EC2) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, o
 	volID := fmt.Sprintf("vol-%d", s.nextVol.Add(1))
 	s.Volumes[volID] = true
 	inst := ec2types.Instance{
-		InstanceId:       aws.String(id),
-		PublicDnsName:    aws.String(id + ".ec2.example.com"),
-		PublicIpAddress:  aws.String("203.0.113.10"),
-		InstanceType:     params.InstanceType,
-		State:            &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning},
+		InstanceId:      aws.String(id),
+		PublicDnsName:   aws.String(id + ".ec2.example.com"),
+		PublicIpAddress: aws.String("203.0.113.10"),
+		InstanceType:    params.InstanceType,
+		State:           &ec2types.InstanceState{Name: ec2types.InstanceStateNameRunning},
 		BlockDeviceMappings: []ec2types.InstanceBlockDeviceMapping{{
 			Ebs: &ec2types.EbsInstanceBlockDevice{VolumeId: aws.String(volID)},
 		}},

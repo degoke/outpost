@@ -17,7 +17,7 @@ func TestMachineListIntegration(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{
-		Stdout: `[{"name":"outpost-dev","status":"Running","type":"container","state":{"network":{"eth0":{"addresses":[{"family":"inet","address":"10.0.0.5"}]}}}}]`,
+		Stdout:   `[{"name":"outpost-dev","status":"Running","type":"container","state":{"network":{"eth0":{"addresses":[{"family":"inet","address":"10.0.0.5"}]}}}}]`,
 		ExitCode: 0,
 	}
 	exec.Responses["ls -1"] = struct {

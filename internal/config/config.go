@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -152,7 +153,7 @@ func SaveGlobal(g *Global) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0600)
+	return writeLockedAtomic(path, data, 0600)
 }
 
 func (g *Global) ResolveHost(name string) (*Host, error) {
@@ -202,7 +203,43 @@ func SaveProject(cwd string, p *Project) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ProjectConfigPath(cwd), data, 0644)
+	return writeLockedAtomic(ProjectConfigPath(cwd), data, 0644)
+}
+
+// writeLockedAtomic serializes local metadata updates and replaces the target
+// in one rename, so concurrent commands cannot observe a partially-written
+// configuration file.
+func writeLockedAtomic(path string, data []byte, mode os.FileMode) error {
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".outpost-write-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func ExpandPath(p string) string {

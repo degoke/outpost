@@ -11,10 +11,6 @@ func (e *SSHExecutor) RunMkdir(dir string) error {
 	return err
 }
 
-type mkdirExecutor interface {
-	RunMkdir(dir string) error
-}
-
 func EnsureRemoteDir(exec Executor, dir string) error {
 	if m, ok := exec.(interface{ RunMkdir(string) error }); ok {
 		return m.RunMkdir(dir)

@@ -9,13 +9,13 @@ import (
 const (
 	ProviderAWS = "aws"
 
-	StateRunning     = "running"
-	StateStopped     = "stopped"
-	StateTerminated  = "terminated"
-	StatePending     = "pending"
-	StateStopping    = "stopping"
+	StateRunning      = "running"
+	StateStopped      = "stopped"
+	StateTerminated   = "terminated"
+	StatePending      = "pending"
+	StateStopping     = "stopping"
 	StateShuttingDown = "shutting-down"
-	StateUnknown     = "unknown"
+	StateUnknown      = "unknown"
 )
 
 type CreateOpts struct {
@@ -41,10 +41,10 @@ type CreateResult struct {
 }
 
 type InstanceState struct {
-	State      string
-	PublicDNS  string
-	PublicIP   string
-	VolumeIDs  []string
+	State     string
+	PublicDNS string
+	PublicIP  string
+	VolumeIDs []string
 }
 
 type DestroyOpts struct {

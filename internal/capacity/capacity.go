@@ -18,13 +18,13 @@ type Request struct {
 }
 
 type Report struct {
-	Host         inspect.HostMetrics `json:"host"`
-	UsedMemory   uint64              `json:"used_memory_bytes"`
-	UsedCPU      float64             `json:"used_cpu_cores"`
-	AvailableMem uint64              `json:"available_memory_bytes"`
-	AvailableCPU float64             `json:"available_cpu_cores"`
-	AvailableDisk uint64             `json:"available_disk_bytes"`
-	Recommendation string            `json:"recommendation"`
+	Host           inspect.HostMetrics `json:"host"`
+	UsedMemory     uint64              `json:"used_memory_bytes"`
+	UsedCPU        float64             `json:"used_cpu_cores"`
+	AvailableMem   uint64              `json:"available_memory_bytes"`
+	AvailableCPU   float64             `json:"available_cpu_cores"`
+	AvailableDisk  uint64              `json:"available_disk_bytes"`
+	Recommendation string              `json:"recommendation"`
 }
 
 func Collect(ctx context.Context, exec transport.Executor) (*Report, error) {

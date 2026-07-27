@@ -20,11 +20,11 @@ const (
 )
 
 type CreateOptions struct {
-	Image           string
-	CPU             float64
-	MemoryBytes     uint64
-	DiskBytes       uint64
-	VirtualMachine  bool
+	Image          string
+	CPU            float64
+	MemoryBytes    uint64
+	DiskBytes      uint64
+	VirtualMachine bool
 }
 
 func (o *CreateOptions) ApplyDefaults() {

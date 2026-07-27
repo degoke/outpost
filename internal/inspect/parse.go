@@ -150,18 +150,18 @@ func ParseDockerStatsLines(out string) ([]ContainerStats, error) {
 			continue
 		}
 		var row struct {
-			ID          string `json:"ID"`
-			Name        string `json:"Name"`
-			CPUPerc     string `json:"CPUPerc"`
-			MemUsage    string `json:"MemUsage"`
-			MemPerc     string `json:"MemPerc"`
-			MemLimit    string `json:"MemLimit"`
-			BlockIO     string `json:"BlockIO"`
-			NetIO       string `json:"NetIO"`
-			PIDs        string `json:"PIDs"`
-			Container   string `json:"Container"`
-			BlockLimit  string `json:"BlockLimit"`
-			NetLimit    string `json:"NetLimit"`
+			ID         string `json:"ID"`
+			Name       string `json:"Name"`
+			CPUPerc    string `json:"CPUPerc"`
+			MemUsage   string `json:"MemUsage"`
+			MemPerc    string `json:"MemPerc"`
+			MemLimit   string `json:"MemLimit"`
+			BlockIO    string `json:"BlockIO"`
+			NetIO      string `json:"NetIO"`
+			PIDs       string `json:"PIDs"`
+			Container  string `json:"Container"`
+			BlockLimit string `json:"BlockLimit"`
+			NetLimit   string `json:"NetLimit"`
 		}
 		if err := json.Unmarshal([]byte(line), &row); err != nil {
 			continue

@@ -25,10 +25,11 @@ chmod 440 /etc/sudoers.d/outpost
 
 OUTPOST_BASE="/var/lib/outpost"
 mkdir -p "$OUTPOST_BASE/projects" "$OUTPOST_BASE/share" "$OUTPOST_BASE/clusters" "$OUTPOST_BASE/machines"
+chown -R outpost:outpost "$OUTPOST_BASE"
 chmod 755 "$OUTPOST_BASE"
 
 install_docker_debian() {
-  if command -v docker >/dev/null 2>&1; then return 0; fi
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then return 0; fi
   apt-get update -qq
   apt-get install -y -qq ca-certificates curl gnupg procps coreutils
   install -m 0755 -d /etc/apt/keyrings

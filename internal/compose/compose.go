@@ -27,8 +27,29 @@ func (r *Runner) buildCmd(subcommand string, args []string) string {
 		shellQuote(r.Project.Name),
 		files,
 		subcommand,
-		strings.Join(args, " "),
+		strings.Join(shellQuoteArgs(args), " "),
 	)
+}
+
+func shellQuoteArgs(args []string) []string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuoteArg(arg)
+	}
+	return quoted
+}
+
+func shellQuoteArg(s string) string {
+	if s != "" {
+		for _, r := range s {
+			if !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r == '=' || r == ',' || r == '@' ||
+				(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+				return shellQuote(s)
+			}
+		}
+		return s
+	}
+	return shellQuote(s)
 }
 
 func shellQuote(s string) string {

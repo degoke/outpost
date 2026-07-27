@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -144,7 +145,18 @@ func (e *SSHExecutor) Run(ctx context.Context, cmd string, opts RunOpts) (int, e
 		session.Stdin = opts.Stdin
 	}
 
-	err = session.Run(cmd)
+	if err := session.Start(cmd); err != nil {
+		return 1, err
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- session.Wait() }()
+	select {
+	case err = <-errCh:
+	case <-ctx.Done():
+		_ = session.Close()
+		<-errCh
+		return 1, ctx.Err()
+	}
 	if err == nil {
 		return 0, nil
 	}
@@ -191,7 +203,18 @@ func (e *SSHExecutor) RunInteractive(ctx context.Context, cmd string, opts RunOp
 	session.Stdout = stdout
 	session.Stderr = stderr
 
-	err = session.Run(cmd)
+	if err := session.Start(cmd); err != nil {
+		return err
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- session.Wait() }()
+	select {
+	case err = <-errCh:
+	case <-ctx.Done():
+		_ = session.Close()
+		<-errCh
+		return ctx.Err()
+	}
 	if err == nil {
 		return nil
 	}
@@ -311,11 +334,16 @@ func ensureRemoteDir(c *sftp.Client, dir string) error {
 type forwardCloser struct {
 	listener net.Listener
 	done     chan struct{}
+	once     sync.Once
 }
 
 func (f *forwardCloser) Close() error {
-	close(f.done)
-	return f.listener.Close()
+	var err error
+	f.once.Do(func() {
+		close(f.done)
+		err = f.listener.Close()
+	})
+	return err
 }
 
 func (e *SSHExecutor) Forward(ctx context.Context, spec ForwardSpec) (io.Closer, error) {

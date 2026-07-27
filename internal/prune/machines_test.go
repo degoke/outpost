@@ -17,7 +17,7 @@ func TestBuildPlanMachines(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{
-		Stdout: `[{"name":"outpost-old","status":"Stopped","type":"container","state":{}}]`,
+		Stdout:   `[{"name":"outpost-old","status":"Stopped","type":"container","state":{}}]`,
 		ExitCode: 0,
 	}
 

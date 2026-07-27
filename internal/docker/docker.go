@@ -9,7 +9,11 @@ import (
 )
 
 func Run(ctx context.Context, exec transport.Executor, args []string) (int, error) {
-	cmd := "docker " + strings.Join(args, " ")
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuoteArg(arg)
+	}
+	cmd := "docker " + strings.Join(quoted, " ")
 	opts := transport.RunOpts{
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
@@ -23,6 +27,23 @@ func Run(ctx context.Context, exec transport.Executor, args []string) (int, erro
 		return 0, err
 	}
 	return exec.Run(ctx, cmd, opts)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func shellQuoteArg(s string) string {
+	if s != "" {
+		for _, r := range s {
+			if !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r == '=' || r == ',' || r == '@' ||
+				(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+				return shellQuote(s)
+			}
+		}
+		return s
+	}
+	return shellQuote(s)
 }
 
 func wantsInteractive(args []string) bool {

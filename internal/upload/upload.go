@@ -80,4 +80,3 @@ func RemoteComposeArgs(proj *config.Project) string {
 	}
 	return strings.Join(parts, " ")
 }
-

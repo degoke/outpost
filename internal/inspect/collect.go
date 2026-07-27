@@ -375,4 +375,3 @@ func CountUnusedNetworks(ctx context.Context, exec transport.Executor) (int, err
 	fmt.Sscanf(strings.TrimSpace(out.String()), "%d", &n)
 	return n, nil
 }
-

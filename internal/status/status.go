@@ -11,12 +11,12 @@ import (
 )
 
 type Report struct {
-	Host       inspect.HostMetrics    `json:"host"`
-	Docker     inspect.DockerSummary  `json:"docker"`
-	Compose    []inspect.ComposeProject `json:"compose_projects,omitempty"`
-	Sharing    SharingSummary         `json:"sharing"`
-	Clusters   int                    `json:"clusters"`
-	Machines   int                    `json:"machines"`
+	Host     inspect.HostMetrics      `json:"host"`
+	Docker   inspect.DockerSummary    `json:"docker"`
+	Compose  []inspect.ComposeProject `json:"compose_projects,omitempty"`
+	Sharing  SharingSummary           `json:"sharing"`
+	Clusters int                      `json:"clusters"`
+	Machines int                      `json:"machines"`
 }
 
 type SharingSummary struct {

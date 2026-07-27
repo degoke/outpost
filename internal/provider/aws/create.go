@@ -49,11 +49,11 @@ func (p *Provisioner) Create(ctx context.Context, opts provider.CreateOpts) (*pr
 
 	userData := cloudInitUserData(opts.SSHPublicKey)
 	runInput := &ec2.RunInstancesInput{
-		ImageId:      aws.String(ami),
-		InstanceType: ec2types.InstanceType(opts.InstanceType),
-		MinCount:     aws.Int32(1),
-		MaxCount:     aws.Int32(1),
-		UserData:     aws.String(userData),
+		ImageId:          aws.String(ami),
+		InstanceType:     ec2types.InstanceType(opts.InstanceType),
+		MinCount:         aws.Int32(1),
+		MaxCount:         aws.Int32(1),
+		UserData:         aws.String(userData),
 		SecurityGroupIds: []string{sgID},
 		TagSpecifications: []ec2types.TagSpecification{
 			{
@@ -181,7 +181,7 @@ func (p *Provisioner) ensureSecurityGroup(ctx context.Context, opts provider.Cre
 				IpProtocol: aws.String("tcp"),
 				FromPort:   aws.Int32(22),
 				ToPort:     aws.Int32(22),
-				IpRanges: []ec2types.IpRange{{CidrIp: aws.String(cidr), Description: aws.String("Outpost SSH")}},
+				IpRanges:   []ec2types.IpRange{{CidrIp: aws.String(cidr), Description: aws.String("Outpost SSH")}},
 			},
 		},
 	})

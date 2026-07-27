@@ -18,15 +18,15 @@ import (
 )
 
 type Machine struct {
-	Name         string  `json:"name"`
-	IncusName    string  `json:"incus_name"`
-	Type         string  `json:"type"`
-	Image        string  `json:"image"`
-	Status       string  `json:"status"`
-	CPU          float64 `json:"cpu"`
-	MemoryBytes  uint64  `json:"memory_bytes"`
-	DiskBytes    uint64  `json:"disk_bytes"`
-	IPv4         string  `json:"ipv4,omitempty"`
+	Name        string  `json:"name"`
+	IncusName   string  `json:"incus_name"`
+	Type        string  `json:"type"`
+	Image       string  `json:"image"`
+	Status      string  `json:"status"`
+	CPU         float64 `json:"cpu"`
+	MemoryBytes uint64  `json:"memory_bytes"`
+	DiskBytes   uint64  `json:"disk_bytes"`
+	IPv4        string  `json:"ipv4,omitempty"`
 }
 
 type Meta struct {

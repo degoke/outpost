@@ -3,6 +3,7 @@ package connect
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -25,11 +26,11 @@ type PortMapping struct {
 }
 
 type Session struct {
-	Host       string     `json:"host"`
-	Project    string     `json:"project"`
-	PID        int        `json:"pid"`
-	StartedAt  time.Time  `json:"started_at"`
-	Forwards   []Forward  `json:"forwards"`
+	Host      string    `json:"host"`
+	Project   string    `json:"project"`
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
+	Forwards  []Forward `json:"forwards"`
 }
 
 type Forward struct {
@@ -152,6 +153,9 @@ func parsePortString(service, s string) (PortMapping, error) {
 	if err != nil {
 		return PortMapping{}, err
 	}
+	if hostPort < 1 || hostPort > 65535 || targetPort < 1 || targetPort > 65535 {
+		return PortMapping{}, fmt.Errorf("ports must be between 1 and 65535")
+	}
 	return PortMapping{Service: service, HostPort: hostPort, TargetPort: targetPort, BindHost: bindHost}, nil
 }
 
@@ -174,7 +178,10 @@ func CheckLocalPort(host string, port int) error {
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
-		return fmt.Errorf("local port %d is already in use — try --local-port %d or stop the conflicting process", port, port+1000)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("local port %d is already in use — try --local-port %d or stop the conflicting process", port, port+1000)
+		}
+		return fmt.Errorf("cannot bind local port %d: %w", port, err)
 	}
 	ln.Close()
 	return nil
@@ -304,7 +311,7 @@ func StartForwards(ctx context.Context, exec transport.Executor, mappings []Port
 			Service:    m.Service,
 			LocalHost:  bindHost,
 			LocalPort:  localPort,
-			RemotePort: m.TargetPort,
+			RemotePort: m.HostPort,
 			URL:        fmt.Sprintf("http://%s:%d", bindHost, localPort),
 		}
 		forwards = append(forwards, fwd)

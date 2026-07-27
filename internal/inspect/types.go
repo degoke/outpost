@@ -41,13 +41,13 @@ type Container struct {
 }
 
 type ContainerStats struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemUsage    uint64  `json:"mem_usage_bytes"`
-	MemLimit    uint64  `json:"mem_limit_bytes"`
-	MemPercent  float64 `json:"mem_percent"`
-	Project     string  `json:"compose_project,omitempty"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	CPUPercent float64 `json:"cpu_percent"`
+	MemUsage   uint64  `json:"mem_usage_bytes"`
+	MemLimit   uint64  `json:"mem_limit_bytes"`
+	MemPercent float64 `json:"mem_percent"`
+	Project    string  `json:"compose_project,omitempty"`
 }
 
 type ComposeProject struct {

@@ -11,10 +11,10 @@ import (
 )
 
 type Executor struct {
-	mu       sync.Mutex
-	Commands []string
-	Uploads  map[string][]byte
-	Files    map[string][]byte
+	mu        sync.Mutex
+	Commands  []string
+	Uploads   map[string][]byte
+	Files     map[string][]byte
 	Responses map[string]struct {
 		Stdout   string
 		Stderr   string
@@ -27,8 +27,8 @@ type Executor struct {
 
 func New() *Executor {
 	return &Executor{
-		Uploads:   map[string][]byte{},
-		Files:     map[string][]byte{},
+		Uploads: map[string][]byte{},
+		Files:   map[string][]byte{},
 		Responses: map[string]struct {
 			Stdout   string
 			Stderr   string

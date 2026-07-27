@@ -50,10 +50,14 @@ go install github.com/goke/outpost/cmd/outpost@latest
 ### Use an existing server
 
 ```bash
-# 1. Register the host
-outpost host add personal --hostname 203.0.113.10 --user ubuntu
+# 1. Register the host (verifies SSH and bootstraps Docker)
+# Password-only VPS (default when no --identity-file is given):
+outpost host add personal --hostname 203.0.113.10 --user ubuntu --auth password
 
-# 2. Connect and set up Docker on the host
+# Or with a dedicated key file:
+outpost host add personal --hostname 203.0.113.10 --user ubuntu --auth key --identity-file ~/.ssh/vps_key
+
+# 2. Re-verify later if needed
 outpost host verify
 
 # 3. Initialize your project (in a repo with docker-compose.yml)
@@ -114,6 +118,35 @@ outpost docker logs my-container
 ```
 
 `compose up`, `build`, and `pull` sync your compose files to the host before running. Commit `.outpost/project.yaml` to git so teammates use the same remote project. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+
+### Moving compose volumes between hosts
+
+Named Docker volumes (for example Postgres data) stay on the host they were created on. Outpost can archive them locally and restore them on another host.
+
+```bash
+# On the old host: save volumes to ~/.outpost/archives/{project}/
+outpost compose volumes export
+
+# On the new host: restore from local archives
+outpost compose volumes import
+
+# Check status
+outpost compose volumes list
+```
+
+When you run `outpost compose up`, Outpost automatically offers to import missing or empty volumes that have local archives. Use `--yes` to skip the prompt.
+
+To move a project:
+
+```bash
+outpost host use old-host
+outpost compose volumes export
+
+# point the project at the new host in .outpost/project.yaml, then:
+outpost host use new-host
+outpost compose volumes import
+outpost compose up -d
+```
 
 ### Port forwarding
 
@@ -256,3 +289,4 @@ These flags work on every command:
 | Port forwarding conflict | Run `outpost connect --status`. Use `--local-port` or `--port` to pick a different local port. |
 | Member access denied | Owner runs `outpost invite list` and approves the device. |
 | Not enough resources | Run `outpost capacity` before creating stacks, clusters, or machines. |
+| Start over locally | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept. |

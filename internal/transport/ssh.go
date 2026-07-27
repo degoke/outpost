@@ -26,6 +26,9 @@ func NewSSH(cfg SSHConfig) (*SSHExecutor, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 22
 	}
+	if cfg.PromptAuth || IsInteractive() {
+		cfg.PromptAuth = true
+	}
 	return &SSHExecutor{cfg: cfg}, nil
 }
 
@@ -33,7 +36,7 @@ func (e *SSHExecutor) connect() (*ssh.Client, error) {
 	if e.client != nil {
 		return e.client, nil
 	}
-	auth, err := buildAuth(e.cfg.IdentityFile)
+	auth, err := buildAuth(e.cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +46,7 @@ func (e *SSHExecutor) connect() (*ssh.Client, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         30 * time.Second,
 	}
-	if kh, err := knownHostsCallback(); err == nil {
+	if kh, err := hostKeyCallback(e.cfg); err == nil {
 		sshCfg.HostKeyCallback = kh
 	}
 	addr := fmt.Sprintf("%s:%d", e.cfg.Hostname, e.cfg.Port)
@@ -53,37 +56,6 @@ func (e *SSHExecutor) connect() (*ssh.Client, error) {
 	}
 	e.client = client
 	return client, nil
-}
-
-func knownHostsCallback() (ssh.HostKeyCallback, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(home, ".ssh", "known_hosts")
-	if _, err := os.Stat(path); err != nil {
-		return nil, err
-	}
-	return knownhosts.New(path)
-}
-
-func buildAuth(identityFile string) ([]ssh.AuthMethod, error) {
-	if identityFile == "" {
-		return nil, fmt.Errorf("no identity file configured: set --identity-file or add one with 'outpost host add'")
-	}
-	identityFile = expandPath(identityFile)
-	key, err := os.ReadFile(identityFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("identity file not found at %s: generate a key with ssh-keygen or specify --identity-file", identityFile)
-		}
-		return nil, fmt.Errorf("read identity file %s: %w", identityFile, err)
-	}
-	signer, err := ssh.ParsePrivateKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("parse identity file %s: %w (is the key encrypted? use ssh-agent or an unencrypted key)", identityFile, err)
-	}
-	return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
 }
 
 func classifyDialError(err error, cfg SSHConfig) error {
@@ -99,6 +71,12 @@ func classifyDialError(err error, cfg SSHConfig) error {
 	case strings.Contains(msg, "i/o timeout"), strings.Contains(msg, "timeout"):
 		return fmt.Errorf("cannot reach %s:%d: connection timed out — check firewall rules and host availability", cfg.Hostname, cfg.Port)
 	case strings.Contains(msg, "unable to authenticate"):
+		if cfg.AuthMode == AuthPassword {
+			return fmt.Errorf("authentication failed for %s@%s — check the password, or choose ssh private key if the server only allows public key login", cfg.User, cfg.Hostname)
+		}
+		if cfg.IdentityFile != "" {
+			return fmt.Errorf("authentication failed for %s@%s using %s — verify the key is authorized in authorized_keys on the host", cfg.User, cfg.Hostname, cfg.IdentityFile)
+		}
 		return fmt.Errorf("authentication failed for %s@%s — verify identity file and authorized_keys on the host", cfg.User, cfg.Hostname)
 	default:
 		return fmt.Errorf("ssh connection to %s failed: %w", cfg.String(), err)

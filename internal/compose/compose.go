@@ -12,9 +12,11 @@ import (
 )
 
 type Runner struct {
-	Exec    transport.Executor
-	Project *config.Project
-	Cwd     string
+	Exec     transport.Executor
+	Project  *config.Project
+	Cwd      string
+	HostName string
+	ForceYes bool
 }
 
 func (r *Runner) BuildCommand(subcommand string, args []string) string {
@@ -63,6 +65,9 @@ func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uplo
 		}
 	}
 	if subcommand == "up" {
+		if err := EnsureImported(ctx, r.Exec, r.Cwd, r.Project, r.HostName, r.ForceYes); err != nil {
+			return 1, err
+		}
 		if err := CheckComposeCapacity(ctx, r.Exec, r.Cwd, r.Project); err != nil {
 			return 1, err
 		}

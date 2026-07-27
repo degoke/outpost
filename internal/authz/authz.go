@@ -87,6 +87,15 @@ func ConfirmPrompt(message string) error {
 	return nil
 }
 
+// ConfirmWithYes skips the prompt when forceYes is set.
+func ConfirmWithYes(message string, forceYes bool) error {
+	if forceYes {
+		fmt.Fprintf(os.Stderr, "%s (continuing due to --yes)\n", message)
+		return nil
+	}
+	return ConfirmPrompt(message)
+}
+
 func ConfirmYesNo(message string, defaultYes bool) bool {
 	if !isTerminal() {
 		return defaultYes

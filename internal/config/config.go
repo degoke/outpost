@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -65,12 +66,18 @@ type Host struct {
 }
 
 type Project struct {
-	Version      int      `yaml:"version"`
-	Name         string   `yaml:"name"`
-	Host         string   `yaml:"host,omitempty"`
-	RemoteDir    string   `yaml:"remote_dir"`
-	ComposeFiles []string `yaml:"compose_files"`
-	ExtraFiles   []string `yaml:"extra_files,omitempty"`
+	Version      int                 `yaml:"version"`
+	Name         string              `yaml:"name"`
+	Host         string              `yaml:"host,omitempty"`
+	RemoteDir    string              `yaml:"remote_dir"`
+	ComposeFiles []string            `yaml:"compose_files"`
+	ExtraFiles   []string            `yaml:"extra_files,omitempty"`
+	Volumes      *ProjectVolumeState `yaml:"volumes,omitempty"`
+}
+
+type ProjectVolumeState struct {
+	LastHost   string    `yaml:"last_host,omitempty"`
+	LastSynced time.Time `yaml:"last_synced,omitempty"`
 }
 
 func ConfigDir() (string, error) {
@@ -107,6 +114,14 @@ func IdentitiesDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "identities"), nil
+}
+
+func VolumeArchivesDir(projectName string) (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "archives", SanitizeProjectName(projectName)), nil
 }
 
 func LoadGlobal() (*Global, error) {
@@ -262,6 +277,19 @@ func KubeconfigsDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "kubeconfigs"), nil
+}
+
+// ResetLocal removes the entire local Outpost configuration directory (~/.outpost).
+// Remote servers and per-repository .outpost/project.yaml files are not affected.
+func ResetLocal() error {
+	dir, err := ConfigDir()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
+	}
+	return os.RemoveAll(dir)
 }
 
 func SanitizeClusterName(name string) string {

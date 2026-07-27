@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 )
 
 type RunOpts struct {
@@ -31,10 +32,40 @@ type Executor interface {
 }
 
 type SSHConfig struct {
-	Hostname     string
-	User         string
-	Port         int
-	IdentityFile string
+	Hostname         string
+	User             string
+	Port             int
+	IdentityFile     string
+	Password         string
+	Passphrase       []byte
+	PromptAuth       bool
+	AuthMode         AuthMode
+	AutoTrustHostKey bool
+}
+
+// AuthMode selects how Outpost authenticates over SSH.
+type AuthMode string
+
+const (
+	// AuthAuto uses --identity-file when set; otherwise password auth only.
+	AuthAuto AuthMode = "auto"
+	// AuthPassword uses the server login password (no local SSH key).
+	AuthPassword AuthMode = "password"
+	// AuthKey uses a private key file (and optional key passphrase).
+	AuthKey AuthMode = "key"
+)
+
+func ParseAuthMode(s string) (AuthMode, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", string(AuthAuto):
+		return AuthAuto, nil
+	case string(AuthPassword):
+		return AuthPassword, nil
+	case string(AuthKey):
+		return AuthKey, nil
+	default:
+		return "", fmt.Errorf("unknown auth mode %q (use auto, password, or key)", s)
+	}
 }
 
 func (c SSHConfig) String() string {

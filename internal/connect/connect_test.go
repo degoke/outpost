@@ -30,8 +30,15 @@ func TestParseComposePorts(t *testing.T) {
 	mappings, err := connect.ParseComposePorts(dir, proj, "")
 	require.NoError(t, err)
 	require.Len(t, mappings, 3)
-	require.Equal(t, 8080, mappings[0].HostPort)
-	require.Equal(t, 80, mappings[0].TargetPort)
+	var web8080 *connect.PortMapping
+	for i := range mappings {
+		if mappings[i].Service == "web" && mappings[i].HostPort == 8080 {
+			web8080 = &mappings[i]
+			break
+		}
+	}
+	require.NotNil(t, web8080)
+	require.Equal(t, 80, web8080.TargetPort)
 }
 
 func TestParseManualPort(t *testing.T) {

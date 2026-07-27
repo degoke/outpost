@@ -1,0 +1,5 @@
+version: 1
+name: node-postgres-redis
+remote_dir: /var/lib/outpost/projects/node-postgres-redis
+compose_files:
+    - docker-compose.yml

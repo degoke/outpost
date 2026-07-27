@@ -3,7 +3,6 @@ package upload
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,20 +15,13 @@ func SyncProject(cwd string, proj *config.Project, exec transport.Executor) erro
 	if err := transport.EnsureRemoteDir(exec, proj.RemoteDir); err != nil {
 		return err
 	}
-	extra := []string{}
-	if _, err := os.Stat(filepath.Join(cwd, ".env")); err == nil {
-		extra = append(extra, ".env")
+	files, err := collectSyncPaths(cwd, proj)
+	if err != nil {
+		return err
 	}
-	files := append([]string{}, proj.ComposeFiles...)
-	files = append(files, proj.ExtraFiles...)
-	files = append(files, extra...)
-
 	for _, rel := range files {
 		local := filepath.Join(cwd, rel)
-		if _, err := os.Stat(local); err != nil {
-			return fmt.Errorf("local file %s: %w", rel, err)
-		}
-		remote := proj.RemoteDir + "/" + filepath.Base(rel)
+		remote := remotePath(proj, rel)
 		if err := syncFile(exec, local, remote); err != nil {
 			return err
 		}
@@ -75,8 +67,19 @@ func fileHash(path string) (string, error) {
 
 func RemoteComposeArgs(proj *config.Project) string {
 	var parts []string
-	for _, f := range proj.ComposeFiles {
+	for _, f := range allComposeFiles(proj) {
 		parts = append(parts, "-f", proj.RemoteDir+"/"+filepath.Base(f))
 	}
 	return strings.Join(parts, " ")
+}
+
+func allComposeFiles(proj *config.Project) []string {
+	files := append([]string{}, proj.ComposeFiles...)
+	files = append(files, proj.ExtraFiles...)
+	return files
+}
+
+// AllComposeFiles returns compose and override files for a project.
+func AllComposeFiles(proj *config.Project) []string {
+	return allComposeFiles(proj)
 }

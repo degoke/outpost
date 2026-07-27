@@ -21,12 +21,14 @@ import (
 
 func TestComposeUpTwiceSameProject(t *testing.T) {
 	exec := mock.New()
+	cwd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "docker-compose.yml"), []byte("services:\n  web:\n    image: nginx\n"), 0644))
 	proj := &config.Project{
 		Name:         "demo",
 		RemoteDir:    "/var/lib/outpost/projects/demo",
 		ComposeFiles: []string{"docker-compose.yml"},
 	}
-	runner := &compose.Runner{Exec: exec, Project: proj, Cwd: t.TempDir()}
+	runner := &compose.Runner{Exec: exec, Project: proj, Cwd: cwd, HostName: "personal", ForceYes: true}
 
 	ctx := context.Background()
 	_, err := runner.Run(ctx, "up", []string{"-d"}, false)

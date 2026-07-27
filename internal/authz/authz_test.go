@@ -31,6 +31,7 @@ func TestRequireMemberAllowed(t *testing.T) {
 	require.NoError(t, authz.RequireMemberAllowed(owner, "host add"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "docker"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "host verify"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "host use"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "invite join"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "prune volumes"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "cluster list"))

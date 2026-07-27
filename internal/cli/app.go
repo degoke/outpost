@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/goke/outpost/internal/status"
 	"github.com/goke/outpost/internal/top"
 	"github.com/goke/outpost/internal/transport"
+	"github.com/goke/outpost/internal/upload"
 	"github.com/spf13/cobra"
 )
 
@@ -96,6 +96,7 @@ func New() *cobra.Command {
 	root.AddCommand(app.capacityCmd())
 	root.AddCommand(app.diskCmd())
 	root.AddCommand(app.pruneCmd())
+	root.AddCommand(app.resetCmd())
 
 	return root
 }
@@ -131,7 +132,7 @@ func (app *App) resolveHostName(proj *config.Project) string {
 }
 
 func (app *App) withExecutor(run func(context.Context, transport.Executor, *config.Host) error) error {
-	exec, h, err := host.NewExecutor(app.Global, app.HostFlag)
+	exec, h, err := host.NewExecutor(app.Global, app.HostFlag, app.ForceYes)
 	if err != nil {
 		return err
 	}
@@ -154,7 +155,7 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 		return err
 	}
 	hostName := app.resolveHostName(proj)
-	exec, h, err := host.NewExecutor(app.Global, hostName)
+	exec, h, err := host.NewExecutor(app.Global, hostName, app.ForceYes)
 	if err != nil {
 		return err
 	}
@@ -310,29 +311,48 @@ func (app *App) providerLoginAWSCmd() *cobra.Command {
 }
 
 func (app *App) hostAddCmd() *cobra.Command {
-	var hostname, user, identityFile string
+	var hostname, user, identityFile, password, auth string
 	var port int
+	var skipBootstrap bool
 	cmd := &cobra.Command{
 		Use:   "add NAME",
-		Short: "Register a remote host",
+		Short: "Register a remote host after verifying SSH access",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			svc := &host.Service{Global: app.Global, Out: app.Out}
-			if identityFile == "" {
-				home, _ := os.UserHomeDir()
-				identityFile = filepath.Join(home, ".ssh", "id_ed25519")
-			}
-			if err := svc.Add(args[0], hostname, user, port, identityFile); err != nil {
+			authMode, err := transport.ParseAuthMode(auth)
+			if err != nil {
 				return err
 			}
-			app.Out.Success("Host %q registered", args[0])
-			return nil
+			sel, err := transport.ResolveAuthSelection(transport.SSHConfig{
+				User:         user,
+				Hostname:     hostname,
+				AuthMode:     authMode,
+				IdentityFile: identityFile,
+			}, cmd.Flags().Changed("auth"))
+			if err != nil {
+				return err
+			}
+			svc := &host.Service{Global: app.Global, Out: app.Out}
+			return svc.Add(context.Background(), host.AddOpts{
+				Name:             args[0],
+				Hostname:         hostname,
+				User:             user,
+				Port:             port,
+				IdentityFile:     sel.IdentityFile,
+				Password:         password,
+				AuthMode:         sel.Mode,
+				SkipBootstrap:    skipBootstrap,
+				AutoTrustHostKey: app.ForceYes,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&hostname, "hostname", "", "SSH hostname or IP")
 	cmd.Flags().StringVar(&user, "user", "", "SSH user")
 	cmd.Flags().IntVar(&port, "port", 22, "SSH port")
-	cmd.Flags().StringVar(&identityFile, "identity-file", "", "path to SSH private key")
+	cmd.Flags().StringVar(&auth, "auth", "auto", "SSH auth: auto, password, or key (prompted when omitted)")
+	cmd.Flags().StringVar(&identityFile, "identity-file", "", "SSH private key (required for --auth key; optional for auto)")
+	cmd.Flags().StringVar(&password, "password", "", "SSH login password (optional; prompted when needed)")
+	cmd.Flags().BoolVar(&skipBootstrap, "skip-bootstrap", false, "verify SSH only, without installing Docker")
 	_ = cmd.MarkFlagRequired("hostname")
 	_ = cmd.MarkFlagRequired("user")
 	return cmd
@@ -369,7 +389,7 @@ func (app *App) hostVerifyCmd() *cobra.Command {
 		Use:   "verify",
 		Short: "Verify connectivity and bootstrap remote dependencies",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return (&host.Service{Global: app.Global, Out: app.Out}).Verify(context.Background(), app.HostFlag, skipBootstrap)
+			return (&host.Service{Global: app.Global, Out: app.Out}).Verify(context.Background(), app.HostFlag, skipBootstrap, app.ForceYes)
 		},
 	}
 	cmd.Flags().BoolVar(&skipBootstrap, "skip-bootstrap", false, "only test SSH connectivity")
@@ -476,6 +496,105 @@ func (app *App) composeCmd() *cobra.Command {
 	cmd.AddCommand(app.composeSubCmd("exec", false, false))
 	cmd.AddCommand(app.composeSubCmd("build", true, false))
 	cmd.AddCommand(app.composeSubCmd("pull", true, false))
+	cmd.AddCommand(app.composeVolumesCmd())
+	return cmd
+}
+
+func (app *App) composeVolumesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "volumes",
+		Short: "Export and import Docker Compose named volumes",
+	}
+	cmd.AddCommand(app.composeVolumesListCmd())
+	cmd.AddCommand(app.composeVolumesExportCmd())
+	cmd.AddCommand(app.composeVolumesImportCmd())
+	return cmd
+}
+
+func (app *App) composeVolumesListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List compose volumes and local archive status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				status, err := compose.ListVolumeStatus(ctx, exec, app.Cwd, proj)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(status)
+				}
+				if len(status) == 0 {
+					app.Out.Info("No named compose volumes found")
+					return nil
+				}
+				for _, st := range status {
+					hostState := "missing"
+					if st.OnHost {
+						if st.EmptyOnHost {
+							hostState = "empty"
+						} else {
+							hostState = "present"
+						}
+					}
+					archiveState := "missing"
+					if st.HasArchive {
+						archiveState = fmt.Sprintf("present (%s)", formatBytes(uint64(st.ArchiveBytes)))
+					}
+					app.Out.Info("%s (%s): host=%s archive=%s", st.LogicalName, st.DockerName, hostState, archiveState)
+				}
+				if proj.Volumes != nil && proj.Volumes.LastHost != "" {
+					app.Out.Info("Last volume sync host: %s", proj.Volumes.LastHost)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) composeVolumesExportCmd() *cobra.Command {
+	var volumeName string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export compose volumes from the remote host to local archives",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				if err := compose.ExportVolumes(ctx, exec, app.Cwd, proj, h.Name, compose.VolumeOptions{
+					VolumeName: volumeName,
+				}); err != nil {
+					return err
+				}
+				app.Out.Success("Compose volumes exported to local archives")
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&volumeName, "volume", "", "export a single volume by logical name")
+	return cmd
+}
+
+func (app *App) composeVolumesImportCmd() *cobra.Command {
+	var volumeName string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "import",
+		Short: "Import compose volumes from local archives to the remote host",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				if err := compose.ImportVolumes(ctx, exec, app.Cwd, proj, h.Name, compose.VolumeOptions{
+					VolumeName: volumeName,
+					Force:      force,
+					ForceYes:   app.ForceYes,
+				}); err != nil {
+					return err
+				}
+				app.Out.Success("Compose volumes imported to remote host")
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&volumeName, "volume", "", "import a single volume by logical name")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing remote volumes")
 	return cmd
 }
 
@@ -492,7 +611,13 @@ func (app *App) composeSubCmd(sub string, uploadFirst, checkDestructive bool) *c
 						return err
 					}
 				}
-				runner := &compose.Runner{Exec: exec, Project: proj, Cwd: app.Cwd}
+				runner := &compose.Runner{
+					Exec:     exec,
+					Project:  proj,
+					Cwd:      app.Cwd,
+					HostName: h.Name,
+					ForceYes: app.ForceYes,
+				}
 				code, err := runner.Run(ctx, sub, args, uploadFirst)
 				if err != nil {
 					return err
@@ -508,7 +633,7 @@ func (app *App) composeSubCmd(sub string, uploadFirst, checkDestructive bool) *c
 
 func (app *App) connectCmd() *cobra.Command {
 	var service string
-	var status, down bool
+	var status, down, foreground, discover bool
 	var localPort int
 	var portSpecs []string
 	cmd := &cobra.Command{
@@ -521,39 +646,71 @@ func (app *App) connectCmd() *cobra.Command {
 			if down {
 				return app.connectDown()
 			}
-			return app.connectStart(service, localPort, portSpecs)
+			return app.connectStart(connectStartOpts{
+				service:           service,
+				localPortOverride: localPort,
+				portSpecs:         portSpecs,
+				foreground:        foreground,
+				discover:          discover,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&service, "service", "", "forward ports for a single service")
 	cmd.Flags().BoolVar(&status, "status", false, "show active forwarding sessions")
 	cmd.Flags().BoolVar(&down, "down", false, "stop forwarding sessions")
+	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "run in the foreground until Ctrl+C (default runs in background)")
+	cmd.Flags().BoolVar(&discover, "discover", false, "discover all published ports from the running remote compose stack")
 	cmd.Flags().IntVar(&localPort, "local-port", 0, "override local port for single-service mode")
 	cmd.Flags().StringArrayVar(&portSpecs, "port", nil, "manual port mapping (e.g. 8080:80)")
 	return cmd
 }
 
-func (app *App) connectStart(service string, localPortOverride int, portSpecs []string) error {
+type connectStartOpts struct {
+	service           string
+	localPortOverride int
+	portSpecs         []string
+	foreground        bool
+	discover          bool
+}
+
+func (app *App) connectStart(opts connectStartOpts) error {
+	if !opts.foreground && !connect.IsWorker() {
+		pid, err := connect.SpawnDetached(os.Args, []string{connect.WorkerEnvKey + "=1"})
+		if err != nil {
+			return err
+		}
+		proj, err := config.LoadProject(app.Cwd)
+		if err != nil {
+			return err
+		}
+		hostName := app.resolveHostName(proj)
+		sess, err := connect.WaitForSession(hostName, proj.Name, 15*time.Second)
+		if err != nil {
+			return fmt.Errorf("started background forwarder (pid %d) but session was not ready: %w", pid, err)
+		}
+		for _, f := range sess.Forwards {
+			app.Out.Success("%s (service: %s)", f.URL, f.Service)
+		}
+		app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost connect --down", pid)
+		return nil
+	}
+
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 		if err := connect.EnsureNoActiveSession(h.Name, proj.Name); err != nil {
 			return err
 		}
-		mappings, err := connect.ParseComposePorts(app.Cwd, proj, service)
-		if err != nil && len(portSpecs) == 0 {
+		composeArgs := upload.RemoteComposeArgs(proj)
+		mappings, err := connect.ResolvePortMappings(ctx, exec, app.Cwd, proj, composeArgs, connect.ResolveOptions{
+			Service:     opts.service,
+			Discover:    opts.discover,
+			ManualSpecs: opts.portSpecs,
+		})
+		if err != nil {
 			return err
 		}
-		for _, spec := range portSpecs {
-			pm, err := connect.ParseManualPort(spec)
-			if err != nil {
-				return err
-			}
-			mappings = connect.MergePortMappings(mappings, []connect.PortMapping{pm})
-		}
-		if len(mappings) == 0 {
-			return fmt.Errorf("no ports to forward — publish ports in compose or pass --port")
-		}
 		overrides := map[string]int{}
-		if localPortOverride > 0 && len(mappings) == 1 {
-			overrides[mappings[0].Service] = localPortOverride
+		if opts.localPortOverride > 0 && len(mappings) == 1 {
+			overrides[mappings[0].Service] = opts.localPortOverride
 		}
 		forwards, closers, err := connect.StartForwards(ctx, exec, mappings, overrides)
 		if err != nil {
@@ -575,7 +732,11 @@ func (app *App) connectStart(service string, localPortOverride int, portSpecs []
 		for _, f := range forwards {
 			app.Out.Success("%s (service: %s)", f.URL, f.Service)
 		}
-		app.Out.Info("Press Ctrl+C to stop forwarding")
+		if opts.foreground {
+			app.Out.Info("Press Ctrl+C to stop forwarding")
+		} else {
+			app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost connect --down", os.Getpid())
+		}
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
@@ -692,7 +853,7 @@ func (app *App) inviteJoin(code, label, joinHost, hostname, user string, port in
 
 	if joinHost != "" {
 		var err error
-		exec, h, err = host.NewExecutor(app.Global, joinHost)
+		exec, h, err = host.NewExecutor(app.Global, joinHost, app.ForceYes)
 		if err != nil {
 			return err
 		}
@@ -705,20 +866,20 @@ func (app *App) inviteJoin(code, label, joinHost, hostname, user string, port in
 		if user == "" {
 			user = h.User
 		}
+		if strings.TrimSpace(hostname) == "" || strings.TrimSpace(user) == "" {
+			return fmt.Errorf("host %q is missing connection details — pass --hostname and --user, or use a registered host that has them", joinHost)
+		}
 	} else {
 		if hostname == "" || user == "" {
 			return fmt.Errorf("join requires --hostname and --user, or an existing --host entry for registration SSH")
 		}
-		if identityFile == "" {
-			home, _ := os.UserHomeDir()
-			identityFile = filepath.Join(home, ".ssh", "id_ed25519")
-		}
-		var err error
 		sshExec, err := transport.NewSSH(transport.SSHConfig{
-			Hostname:     hostname,
-			User:         user,
-			Port:         port,
-			IdentityFile: config.ExpandPath(identityFile),
+			Hostname:         hostname,
+			User:             user,
+			Port:             port,
+			IdentityFile:     config.ExpandPath(identityFile),
+			PromptAuth:       true,
+			AutoTrustHostKey: app.ForceYes,
 		})
 		if err != nil {
 			return err
@@ -1594,6 +1755,27 @@ func (app *App) runPrune(dryRun, volumes, force bool) error {
 		}
 		return nil
 	})
+}
+
+func (app *App) resetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset",
+		Short: "Clear all local Outpost configuration",
+		Long: "Delete ~/.outpost, including registered hosts, SSH identities, sessions, and kubeconfigs. " +
+			"Remote servers are not affected. Repository .outpost/project.yaml files are not removed.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !app.ForceYes {
+				if err := authz.ConfirmPrompt("This will delete all local Outpost configuration. Remote servers are not affected"); err != nil {
+					return err
+				}
+			}
+			if err := config.ResetLocal(); err != nil {
+				return err
+			}
+			app.Out.Success("Local Outpost configuration cleared")
+			return nil
+		},
+	}
 }
 
 func formatDuration(seconds uint64) string {

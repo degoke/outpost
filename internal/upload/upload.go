@@ -41,6 +41,11 @@ func syncFile(exec transport.Executor, local, remote string) error {
 }
 
 func needsUpload(exec transport.Executor, local, remote string) (bool, error) {
+	return NeedsUpload(exec, local, remote)
+}
+
+// NeedsUpload reports whether local and remote file content differ.
+func NeedsUpload(exec transport.Executor, local, remote string) (bool, error) {
 	localHash, err := fileHash(local)
 	if err != nil {
 		return true, err

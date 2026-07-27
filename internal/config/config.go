@@ -72,7 +72,21 @@ type Project struct {
 	RemoteDir    string              `yaml:"remote_dir"`
 	ComposeFiles []string            `yaml:"compose_files"`
 	ExtraFiles   []string            `yaml:"extra_files,omitempty"`
+	Python       *ProjectPython      `yaml:"python,omitempty"`
 	Volumes      *ProjectVolumeState `yaml:"volumes,omitempty"`
+}
+
+type ProjectPython struct {
+	Venv         string `yaml:"venv,omitempty"`
+	Requirements string `yaml:"requirements,omitempty"`
+}
+
+// RequireCompose reports whether the project has compose files configured.
+func (p *Project) RequireCompose() error {
+	if p == nil || len(p.ComposeFiles) == 0 {
+		return fmt.Errorf("no compose files configured — add docker-compose.yml and run 'outpost init', or use 'outpost mirror' for script-only projects")
+	}
+	return nil
 }
 
 type ProjectVolumeState struct {

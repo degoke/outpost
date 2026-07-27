@@ -59,6 +59,9 @@ func shellQuote(s string) string {
 }
 
 func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uploadFirst bool) (int, error) {
+	if err := r.Project.RequireCompose(); err != nil {
+		return 1, err
+	}
 	if uploadFirst {
 		if err := upload.SyncProject(r.Cwd, r.Project, r.Exec); err != nil {
 			return 1, err

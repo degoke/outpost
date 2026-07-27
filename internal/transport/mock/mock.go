@@ -47,6 +47,9 @@ func (m *Executor) HostInfo() string {
 }
 
 func (m *Executor) Run(ctx context.Context, cmd string, opts transport.RunOpts) (int, error) {
+	if opts.WorkDir != "" {
+		cmd = applyWorkDir(cmd, opts.WorkDir)
+	}
 	m.mu.Lock()
 	m.Commands = append(m.Commands, cmd)
 	resp, ok := m.matchResponse(cmd)
@@ -158,4 +161,12 @@ func (m *Executor) HasCommand(substr string) bool {
 		}
 	}
 	return false
+}
+
+func applyWorkDir(cmd, workDir string) string {
+	if workDir == "" {
+		return cmd
+	}
+	escaped := strings.ReplaceAll(workDir, "'", "'\\''")
+	return fmt.Sprintf("cd '%s' && %s", escaped, cmd)
 }

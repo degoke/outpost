@@ -21,6 +21,7 @@ import (
 	"github.com/goke/outpost/internal/docker"
 	"github.com/goke/outpost/internal/host"
 	"github.com/goke/outpost/internal/machine"
+	"github.com/goke/outpost/internal/mirror"
 	"github.com/goke/outpost/internal/output"
 	"github.com/goke/outpost/internal/project"
 	"github.com/goke/outpost/internal/prune"
@@ -90,6 +91,7 @@ func New() *cobra.Command {
 	root.AddCommand(app.machineCmd())
 	root.AddCommand(app.kubectlCmd())
 	root.AddCommand(app.connectCmd())
+	root.AddCommand(app.mirrorCmd())
 	root.AddCommand(app.inviteCmd())
 	root.AddCommand(app.statusCmd())
 	root.AddCommand(app.topCmd())
@@ -431,12 +433,12 @@ func (app *App) hostDestroyCmd() *cobra.Command {
 
 func (app *App) initCmd() *cobra.Command {
 	var name, hostName string
-	var writeGitignore bool
+	var writeGitignore, noCompose bool
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize Outpost for the current repository",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			p, err := project.Init(app.Cwd, name, hostName, writeGitignore)
+			p, err := project.Init(app.Cwd, name, hostName, writeGitignore, noCompose)
 			if err != nil {
 				return err
 			}
@@ -454,6 +456,7 @@ func (app *App) initCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "stable project name")
 	cmd.Flags().StringVar(&hostName, "host", "", "host override")
 	cmd.Flags().BoolVar(&writeGitignore, "write-gitignore", false, "append .outpost/ to .gitignore")
+	cmd.Flags().BoolVar(&noCompose, "no-compose", false, "initialize without a compose file (mirror-only projects)")
 	return cmd
 }
 
@@ -696,6 +699,11 @@ func (app *App) connectStart(opts connectStartOpts) error {
 	}
 
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+		if len(opts.portSpecs) == 0 {
+			if err := proj.RequireCompose(); err != nil {
+				return err
+			}
+		}
 		if err := connect.EnsureNoActiveSession(h.Name, proj.Name); err != nil {
 			return err
 		}
@@ -779,6 +787,234 @@ func (app *App) connectDown() error {
 	}
 	app.Out.Success("Forwarding session stopped")
 	return nil
+}
+
+func (app *App) mirrorCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mirror",
+		Short: "Sync and run commands remotely in the project directory",
+	}
+	cmd.AddCommand(app.mirrorSyncCmd())
+	cmd.AddCommand(app.mirrorSetupPythonCmd())
+	cmd.AddCommand(app.mirrorRunCmd())
+	cmd.AddCommand(app.mirrorShellCmd())
+	cmd.AddCommand(app.mirrorSessionsCmd())
+	return cmd
+}
+
+func (app *App) mirrorSyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Sync the repository to the remote project directory",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				if err := runner.Sync(ctx); err != nil {
+					return err
+				}
+				app.Out.Success("Repository synced to %s", proj.RemoteDir)
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) mirrorSetupPythonCmd() *cobra.Command {
+	var pythonBin, requirements string
+	cmd := &cobra.Command{
+		Use:   "setup-python",
+		Short: "Create a remote Python virtual environment and install requirements",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				if err := runner.SetupPython(ctx, mirror.SetupPythonOptions{
+					Python:       pythonBin,
+					Requirements: requirements,
+				}); err != nil {
+					return err
+				}
+				app.Out.Success("Remote Python environment ready at %s/%s", proj.RemoteDir, runner.VenvPath())
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&pythonBin, "python", "python3", "Python interpreter for creating the venv")
+	cmd.Flags().StringVar(&requirements, "requirements", "", "requirements file (default from project.yaml or requirements.txt)")
+	return cmd
+}
+
+func (app *App) mirrorRunCmd() *cobra.Command {
+	var detach bool
+	var sessionName string
+	var noSync bool
+	var noVenv bool
+	cmd := &cobra.Command{
+		Use:                "run [flags] -- COMMAND [ARGS...]",
+		Short:              "Run a command in the remote project directory",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rest := args
+			var commandArgs []string
+			for len(rest) > 0 {
+				if rest[0] == "--" {
+					rest = rest[1:]
+					commandArgs = rest
+					break
+				}
+				if !strings.HasPrefix(rest[0], "-") {
+					commandArgs = rest
+					break
+				}
+				switch rest[0] {
+				case "-d", "--detach":
+					detach = true
+				case "--name":
+					if len(rest) < 2 {
+						return fmt.Errorf("--name requires a value")
+					}
+					sessionName = rest[1]
+					rest = rest[2:]
+					continue
+				case "--no-sync":
+					noSync = true
+				case "--no-venv":
+					noVenv = true
+				default:
+					return fmt.Errorf("unknown flag %q", rest[0])
+				}
+				rest = rest[1:]
+			}
+			if len(commandArgs) == 0 {
+				return fmt.Errorf("command is required")
+			}
+			command := strings.Join(commandArgs, " ")
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				result, err := runner.Run(ctx, mirror.RunOptions{
+					Detach:      detach,
+					SessionName: sessionName,
+					NoSync:      noSync,
+					NoVenv:      noVenv,
+					Command:     command,
+				})
+				if err != nil {
+					return err
+				}
+				if detach {
+					app.Out.Success("Started detached session %q", result.SessionName)
+					return nil
+				}
+				if result.ExitCode != 0 {
+					os.Exit(result.ExitCode)
+				}
+				return nil
+			})
+		},
+	}
+	return cmd
+}
+
+func (app *App) mirrorShellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell",
+		Short: "Open an interactive shell in the remote project directory",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				return runner.Shell(ctx)
+			})
+		},
+	}
+}
+
+func (app *App) mirrorSessionsCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "sessions", Short: "Manage detached mirror sessions"}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List mirror sessions for this project",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				sessions, err := runner.ListSessions(ctx)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(sessions)
+				}
+				if len(sessions) == 0 {
+					app.Out.Info("No mirror sessions")
+					return nil
+				}
+				for _, s := range sessions {
+					state := "running"
+					if !s.Running {
+						state = "stopped"
+					}
+					app.Out.Info("%s (%s)", s.Name, state)
+				}
+				return nil
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "status NAME",
+		Short: "Show session status and recent log output",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				status, err := runner.SessionStatus(ctx, args[0])
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(status)
+				}
+				if status.Running {
+					app.Out.Info("Session %q is running", status.Name)
+				} else if status.ExitCode != nil {
+					app.Out.Info("Session %q finished with exit code %d", status.Name, *status.ExitCode)
+				} else {
+					app.Out.Info("Session %q is not running", status.Name)
+				}
+				if status.Command != "" {
+					app.Out.Info("Command: %s", status.Command)
+				}
+				if status.LogTail != "" {
+					app.Out.Info("Recent output:\n%s", status.LogTail)
+				}
+				return nil
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "attach NAME",
+		Short: "Attach to a mirror session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				return runner.AttachSession(ctx, args[0])
+			})
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "kill NAME",
+		Short: "Stop a mirror session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				if err := runner.KillSession(ctx, args[0]); err != nil {
+					return err
+				}
+				app.Out.Success("Stopped session %s", args[0])
+				return nil
+			})
+		},
+	})
+	return cmd
 }
 
 func (app *App) inviteCmd() *cobra.Command {

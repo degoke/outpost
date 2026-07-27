@@ -140,6 +140,9 @@ func resolveVolumesFromComposeConfig(ctx context.Context, exec transport.Executo
 }
 
 func prepareVolumeOps(ctx context.Context, exec transport.Executor, cwd string, proj *config.Project) ([]VolumeInfo, error) {
+	if err := proj.RequireCompose(); err != nil {
+		return nil, err
+	}
 	if err := upload.SyncProject(cwd, proj, exec); err != nil {
 		return nil, err
 	}

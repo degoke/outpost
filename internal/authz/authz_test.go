@@ -20,6 +20,7 @@ func TestConfirmDestructiveSkipsWhenAlone(t *testing.T) {
 }
 
 func TestMemberAllowedCommands(t *testing.T) {
+	require.True(t, authz.MemberAllowedCommand("mirror"))
 	require.True(t, authz.MemberAllowedCommand("docker"))
 	require.True(t, authz.MemberAllowedCommand("status"))
 	require.False(t, authz.MemberAllowedCommand("init"))
@@ -30,6 +31,7 @@ func TestRequireMemberAllowed(t *testing.T) {
 	member := &config.Host{Role: config.RoleMember}
 	require.NoError(t, authz.RequireMemberAllowed(owner, "host add"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "docker"))
+	require.NoError(t, authz.RequireMemberAllowed(member, "mirror run"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "host verify"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "host use"))
 	require.NoError(t, authz.RequireMemberAllowed(member, "invite join"))

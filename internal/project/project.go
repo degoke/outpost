@@ -41,10 +41,14 @@ func DeriveName(cwd, explicit string) string {
 	return config.SanitizeProjectName(filepath.Base(cwd))
 }
 
-func Init(cwd, name, host string, writeGitignore bool) (*config.Project, error) {
-	composeFile, err := DetectComposeFile(cwd)
-	if err != nil {
-		return nil, err
+func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Project, error) {
+	var composeFiles []string
+	if !noCompose {
+		composeFile, err := DetectComposeFile(cwd)
+		if err != nil {
+			return nil, err
+		}
+		composeFiles = []string{composeFile}
 	}
 	projectName := DeriveName(cwd, name)
 
@@ -61,7 +65,7 @@ func Init(cwd, name, host string, writeGitignore bool) (*config.Project, error) 
 		Name:         projectName,
 		Host:         host,
 		RemoteDir:    filepath.Join(config.DefaultRemoteBase, "projects", projectName),
-		ComposeFiles: []string{composeFile},
+		ComposeFiles: composeFiles,
 	}
 
 	if existing != nil {
@@ -71,8 +75,16 @@ func Init(cwd, name, host string, writeGitignore bool) (*config.Project, error) 
 		p.Name = existing.Name
 		p.RemoteDir = existing.RemoteDir
 		p.ExtraFiles = existing.ExtraFiles
+		p.Python = existing.Python
 		if host == "" {
 			p.Host = existing.Host
+		}
+		if noCompose {
+			p.ComposeFiles = nil
+		} else if len(composeFiles) > 0 {
+			p.ComposeFiles = composeFiles
+		} else if len(existing.ComposeFiles) > 0 {
+			p.ComposeFiles = existing.ComposeFiles
 		}
 	}
 

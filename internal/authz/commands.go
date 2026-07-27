@@ -26,7 +26,7 @@ func memberAllowedPath(cmdPath string) bool {
 	}
 	root := parts[0]
 	switch root {
-	case "docker", "compose", "connect", "status", "top", "capacity", "disk", "kubectl", "reset":
+	case "docker", "compose", "connect", "mirror", "status", "top", "capacity", "disk", "kubectl", "reset":
 		return true
 	case "prune":
 		if len(parts) >= 2 && (parts[1] == "clusters" || parts[1] == "machines") {

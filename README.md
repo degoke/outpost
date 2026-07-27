@@ -10,6 +10,7 @@ Use an existing Linux server or let Outpost provision one on AWS. Share the host
 - **Kubernetes with kind** — create named clusters and run `kubectl` remotely.
 - **Linux machines with Incus** — system containers by default; full VMs when the host supports KVM.
 - **Local port forwarding** — reach remote services at `http://127.0.0.1:8080` from your machine.
+- **Remote mirror** — sync your repo and run commands on the host; detached tmux sessions survive disconnects.
 - **Team sharing** — invite collaborators with device approval; owners keep control of the host and cloud account.
 
 ## How it works
@@ -118,6 +119,28 @@ outpost docker logs my-container
 ```
 
 `compose up`, `build`, and `pull` sync your compose files to the host before running. Commit `.outpost/project.yaml` to git so teammates use the same remote project. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+
+### Remote mirror
+
+Run scripts and commands on the host from your local repo without copying large generated outputs back to your laptop. Mirror syncs your repository (respecting `.gitignore`), runs commands in the project's remote directory, and supports detached tmux sessions that survive disconnects.
+
+```bash
+outpost mirror sync
+outpost mirror run node scripts/generate.js
+outpost mirror run -d --name gen node scripts/generate-40k.js
+
+outpost mirror sessions list
+outpost mirror sessions status gen
+outpost mirror sessions attach gen
+outpost mirror sessions kill gen
+
+# Python (remote-only .venv — never synced from your laptop)
+outpost mirror setup-python
+outpost mirror run python scripts/train.py
+outpost mirror shell
+```
+
+For script-only repositories without Docker Compose, initialize with `outpost init --no-compose`.
 
 ### Moving compose volumes between hosts
 

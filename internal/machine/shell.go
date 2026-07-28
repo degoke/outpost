@@ -15,12 +15,18 @@ func (s *Service) Shell(ctx context.Context, name string) error {
 		return err
 	}
 	shell := "bash"
-	checkCmd := fmt.Sprintf("incus exec %s -- test -x /bin/bash", shellQuote(incusName))
+	checkCmd, err := s.incusCommand(ctx, fmt.Sprintf("exec %s -- test -x /bin/bash", shellQuote(incusName)))
+	if err != nil {
+		return err
+	}
 	code, _ := s.Exec.Run(ctx, checkCmd, transport.RunOpts{})
 	if code != 0 {
 		shell = "sh"
 	}
-	cmd := fmt.Sprintf("incus exec -t %s -- %s", shellQuote(incusName), shell)
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("exec -t %s -- %s", shellQuote(incusName), shell))
+	if err != nil {
+		return err
+	}
 	opts := transport.RunOpts{
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
@@ -41,7 +47,10 @@ func (s *Service) RunCommand(ctx context.Context, name string, args []string) (i
 	if err != nil {
 		return 1, err
 	}
-	cmd := fmt.Sprintf("incus exec %s -- %s", shellQuote(incusName), strings.Join(shellQuoteArgs(args), " "))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("exec %s -- %s", shellQuote(incusName), strings.Join(shellQuoteArgs(args), " ")))
+	if err != nil {
+		return 1, err
+	}
 	opts := transport.RunOpts{
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,

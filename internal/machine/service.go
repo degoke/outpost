@@ -47,9 +47,10 @@ type DeleteInfo struct {
 }
 
 type Service struct {
-	Exec     transport.Executor
-	Out      *output.Printer
-	HostName string
+	Exec           transport.Executor
+	Out            *output.Printer
+	HostName       string
+	cachedIncusCLI string
 }
 
 type incusListEntry struct {
@@ -118,7 +119,7 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 	memLimit := FormatSize(opts.MemoryBytes)
 	diskLimit := FormatSize(opts.DiskBytes)
 	launchParts := []string{
-		"incus launch",
+		"launch",
 		shellQuote(incusLocalImageRef(opts.Image)),
 		shellQuote(incusName),
 	}
@@ -130,7 +131,10 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 	if opts.VirtualMachine {
 		launchParts = append(launchParts, "--vm")
 	}
-	createCmd := strings.Join(launchParts, " ")
+	createCmd, err := s.incusCommand(ctx, strings.Join(launchParts, " "))
+	if err != nil {
+		return err
+	}
 
 	code, err := s.Exec.Run(ctx, createCmd, transport.RunOpts{})
 	if err != nil {
@@ -258,7 +262,10 @@ func (s *Service) SnapshotCreate(ctx context.Context, name, snapName string) err
 	if strings.TrimSpace(snapName) == "" {
 		snapName = fmt.Sprintf("snap-%d", time.Now().Unix())
 	}
-	cmd := fmt.Sprintf("incus snapshot create %s %s", shellQuote(incusName), shellQuote(snapName))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("snapshot create %s %s", shellQuote(incusName), shellQuote(snapName)))
+	if err != nil {
+		return err
+	}
 	code, err := s.Exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err
@@ -274,7 +281,10 @@ func (s *Service) SnapshotList(ctx context.Context, name string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	cmd := fmt.Sprintf("incus list %s/snapshots -c n --format csv", shellQuote(incusName))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("list %s/snapshots -c n --format csv", shellQuote(incusName)))
+	if err != nil {
+		return nil, err
+	}
 	out, err := inspect.RunOutput(ctx, s.Exec, cmd)
 	if err != nil {
 		return nil, err
@@ -294,7 +304,10 @@ func (s *Service) SnapshotDelete(ctx context.Context, name, snapName string) err
 	if err != nil {
 		return err
 	}
-	cmd := fmt.Sprintf("incus delete %s/%s", shellQuote(incusName), shellQuote(snapName))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("delete %s/%s", shellQuote(incusName), shellQuote(snapName)))
+	if err != nil {
+		return err
+	}
 	code, err := s.Exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err
@@ -325,7 +338,10 @@ func (s *Service) DeleteInfo(ctx context.Context, name string) (*DeleteInfo, err
 }
 
 func (s *Service) instanceDiskBytes(ctx context.Context, incusName string) (uint64, error) {
-	cmd := fmt.Sprintf("incus config device get %s root size 2>/dev/null || true", shellQuote(incusName))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("config device get %s root size 2>/dev/null || true", shellQuote(incusName)))
+	if err != nil {
+		return 0, err
+	}
 	out, err := inspect.RunOutput(ctx, s.Exec, cmd)
 	if err != nil {
 		return 0, err
@@ -353,7 +369,10 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 }
 
 func (s *Service) runIncusAction(ctx context.Context, action, incusName string) error {
-	cmd := fmt.Sprintf("incus %s %s", action, shellQuote(incusName))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("%s %s", action, shellQuote(incusName)))
+	if err != nil {
+		return err
+	}
 	code, err := s.Exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {
 		return err
@@ -365,8 +384,11 @@ func (s *Service) runIncusAction(ctx context.Context, action, incusName string) 
 }
 
 func (s *Service) deleteIncusInstance(ctx context.Context, incusName string) error {
-	cmd := fmt.Sprintf("incus delete %s --force 2>/dev/null || true", shellQuote(incusName))
-	_, err := s.Exec.Run(ctx, cmd, transport.RunOpts{})
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("delete %s --force 2>/dev/null || true", shellQuote(incusName)))
+	if err != nil {
+		return err
+	}
+	_, err = s.Exec.Run(ctx, cmd, transport.RunOpts{})
 	return err
 }
 
@@ -377,7 +399,11 @@ type runtimeInfo struct {
 }
 
 func (s *Service) listRuntime(ctx context.Context) (map[string]runtimeInfo, error) {
-	out, err := inspect.RunOutput(ctx, s.Exec, "incus list --format json 2>/dev/null || true")
+	cmd, err := s.incusCommand(ctx, "list --format json 2>/dev/null || true")
+	if err != nil {
+		return nil, err
+	}
+	out, err := inspect.RunOutput(ctx, s.Exec, cmd)
 	if err != nil {
 		return nil, err
 	}

@@ -109,7 +109,7 @@ func (s *Service) copyToMachine(ctx context.Context, localPath, machineName, rem
 	}
 	defer func() { _, _ = s.Exec.Run(ctx, "rm -rf "+shellQuote(stagingPath), quietRunOpts()) }()
 
-	pushParts := []string{"incus file push"}
+	pushParts := []string{"file push"}
 	if !s.copyProgressEnabled() {
 		pushParts = append(pushParts, "--quiet")
 	}
@@ -120,7 +120,11 @@ func (s *Service) copyToMachine(ctx context.Context, localPath, machineName, rem
 		shellQuote(stagingPath),
 		shellQuote(incusInstancePath(incusName, remotePath)),
 	)
-	code, err := s.Exec.Run(ctx, strings.Join(pushParts, " "), s.copyRunOpts())
+	pushCmd, err := s.incusCommand(ctx, strings.Join(pushParts, " "))
+	if err != nil {
+		return err
+	}
+	code, err := s.Exec.Run(ctx, pushCmd, s.copyRunOpts())
 	if err != nil {
 		return err
 	}
@@ -128,8 +132,10 @@ func (s *Service) copyToMachine(ctx context.Context, localPath, machineName, rem
 		return fmt.Errorf("incus file push failed (exit %d)", code)
 	}
 	if !info.IsDir() && info.Mode()&0111 != 0 {
-		chmodCmd := fmt.Sprintf("incus exec %s -- chmod +x %s", shellQuote(incusName), shellQuote(remotePath))
-		_, _ = s.Exec.Run(ctx, chmodCmd, quietRunOpts())
+		chmodCmd, err := s.incusCommand(ctx, fmt.Sprintf("exec %s -- chmod +x %s", shellQuote(incusName), shellQuote(remotePath)))
+		if err == nil {
+			_, _ = s.Exec.Run(ctx, chmodCmd, quietRunOpts())
+		}
 	}
 	if s.Out != nil && !s.Out.JSON {
 		s.Out.Success("Copied %s -> %s:%s", localPath, machineName, remotePath)
@@ -149,7 +155,7 @@ func (s *Service) copyFromMachine(ctx context.Context, machineName, remotePath, 
 	stagingPath := stagingDir + "/" + filepath.Base(remotePath)
 	defer func() { _, _ = s.Exec.Run(ctx, "rm -rf "+shellQuote(stagingPath), quietRunOpts()) }()
 
-	pullParts := []string{"incus file pull"}
+	pullParts := []string{"file pull"}
 	if !s.copyProgressEnabled() {
 		pullParts = append(pullParts, "--quiet")
 	}
@@ -160,7 +166,11 @@ func (s *Service) copyFromMachine(ctx context.Context, machineName, remotePath, 
 		shellQuote(incusInstancePath(incusName, remotePath)),
 		shellQuote(stagingPath),
 	)
-	code, err := s.Exec.Run(ctx, strings.Join(pullParts, " "), s.copyRunOpts())
+	pullCmd, err := s.incusCommand(ctx, strings.Join(pullParts, " "))
+	if err != nil {
+		return err
+	}
+	code, err := s.Exec.Run(ctx, pullCmd, s.copyRunOpts())
 	if err != nil {
 		return err
 	}
@@ -237,7 +247,10 @@ func (s *Service) ensureRemoteParentDir(ctx context.Context, incusName, remotePa
 	if parent == "." || parent == "/" || parent == "" {
 		return nil
 	}
-	cmd := fmt.Sprintf("incus exec %s -- mkdir -p %s", shellQuote(incusName), shellQuote(parent))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("exec %s -- mkdir -p %s", shellQuote(incusName), shellQuote(parent)))
+	if err != nil {
+		return err
+	}
 	code, err := s.Exec.Run(ctx, cmd, quietRunOpts())
 	if err != nil {
 		return err

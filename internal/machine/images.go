@@ -58,8 +58,12 @@ func IncusLocalImageRefForTest(image string) string {
 }
 
 func (s *Service) ensureImage(ctx context.Context, image string) error {
+	cli, err := s.incusCLI(ctx)
+	if err != nil {
+		return err
+	}
 	localImage := incusLocalImageRef(image)
-	infoCmd := fmt.Sprintf("incus image info %s >/dev/null 2>&1", shellQuote(localImage))
+	infoCmd := fmt.Sprintf("%s image info %s >/dev/null 2>&1", cli, shellQuote(localImage))
 	code, err := s.Exec.Run(ctx, infoCmd, transport.RunOpts{})
 	if err != nil {
 		return err
@@ -77,19 +81,23 @@ func (s *Service) ensureImage(ctx context.Context, image string) error {
 		s.Out.Info("Pulling Incus image %s...", image)
 	}
 	copyParts := []string{
-		"incus image copy",
+		"image copy",
 		shellQuote(remoteRef),
 		"local:",
 	}
 	if localAlias != "" {
 		copyParts = append(copyParts, "--alias", shellQuote(localAlias))
 	}
-	code, err = s.Exec.Run(ctx, strings.Join(copyParts, " "), transport.RunOpts{})
+	pullCmd, err := s.incusCommand(ctx, strings.Join(copyParts, " "))
+	if err != nil {
+		return err
+	}
+	code, err = s.Exec.Run(ctx, pullCmd, transport.RunOpts{})
 	if err != nil {
 		return err
 	}
 	if code != 0 {
-		return fmt.Errorf("failed to pull image %q from %s — verify the host can reach images.linuxcontainers.org", image, remoteRef)
+		return fmt.Errorf("failed to pull image %q from %s — verify the host can reach images.linuxcontainers.org and that your user can access incus", image, remoteRef)
 	}
 	return nil
 }

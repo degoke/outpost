@@ -253,7 +253,7 @@ fi
 `
 
 func EnsureIncus(ctx context.Context, exec transport.Executor) error {
-	code, err := exec.Run(ctx, "command -v incus >/dev/null 2>&1 && incus list >/dev/null 2>&1", transport.RunOpts{})
+	code, err := exec.Run(ctx, "command -v incus >/dev/null 2>&1 && (incus list >/dev/null 2>&1 || sudo incus list >/dev/null 2>&1)", transport.RunOpts{})
 	if err != nil {
 		return err
 	}

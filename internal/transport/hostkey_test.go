@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh/knownhosts"
 )

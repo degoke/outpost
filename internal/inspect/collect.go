@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 func CollectHostMetrics(ctx context.Context, exec transport.Executor) (HostMetrics, error) {

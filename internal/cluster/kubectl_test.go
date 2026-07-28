@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goke/outpost/internal/cluster"
-	"github.com/goke/outpost/internal/transport/mock"
+	"github.com/degoke/outpost/internal/cluster"
+	"github.com/degoke/outpost/internal/transport/mock"
 	"github.com/stretchr/testify/require"
 )
 

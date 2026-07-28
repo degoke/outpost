@@ -3,8 +3,8 @@ package mirror_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/mirror"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/mirror"
 	"github.com/stretchr/testify/require"
 )
 

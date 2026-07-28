@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 )
 
 func sessionPrefix(proj *config.Project) string {

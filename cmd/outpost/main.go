@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/goke/outpost/internal/cli"
-	"github.com/goke/outpost/internal/output"
+	"github.com/degoke/outpost/internal/cli"
+	"github.com/degoke/outpost/internal/output"
 )
 
 func main() {

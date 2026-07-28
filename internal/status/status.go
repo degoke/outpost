@@ -3,11 +3,11 @@ package status
 import (
 	"context"
 
-	"github.com/goke/outpost/internal/cluster"
-	"github.com/goke/outpost/internal/inspect"
-	"github.com/goke/outpost/internal/machine"
-	"github.com/goke/outpost/internal/share"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/cluster"
+	"github.com/degoke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/machine"
+	"github.com/degoke/outpost/internal/share"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 type Report struct {

@@ -3,7 +3,7 @@ package inspect_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/inspect"
 	"github.com/stretchr/testify/require"
 )
 

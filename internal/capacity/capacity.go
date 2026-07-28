@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/goke/outpost/internal/inspect"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 const safetyMargin = 0.10

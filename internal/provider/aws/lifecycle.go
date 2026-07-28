@@ -8,8 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/provider"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/provider"
 )
 
 func (p *Provisioner) Start(ctx context.Context, meta *config.ProviderMeta) error {

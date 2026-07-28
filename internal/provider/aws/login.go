@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/goke/outpost/internal/provider"
+	"github.com/degoke/outpost/internal/provider"
 )
 
 type Provisioner struct {

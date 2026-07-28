@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/share"
-	"github.com/goke/outpost/internal/transport/mock"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/share"
+	"github.com/degoke/outpost/internal/transport/mock"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )

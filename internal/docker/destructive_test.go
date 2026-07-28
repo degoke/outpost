@@ -3,7 +3,7 @@ package docker_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/docker"
+	"github.com/degoke/outpost/internal/docker"
 	"github.com/stretchr/testify/require"
 )
 

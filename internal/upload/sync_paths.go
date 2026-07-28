@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

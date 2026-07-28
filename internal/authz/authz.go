@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/transport"
 	"gopkg.in/yaml.v3"
 )
 

@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/goke/outpost/internal/inspect"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 type Printer struct {

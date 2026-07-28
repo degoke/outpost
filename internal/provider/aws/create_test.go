@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/goke/outpost/internal/provider"
-	"github.com/goke/outpost/internal/provider/aws"
-	"github.com/goke/outpost/internal/provider/aws/stub"
+	"github.com/degoke/outpost/internal/provider"
+	"github.com/degoke/outpost/internal/provider/aws"
+	"github.com/degoke/outpost/internal/provider/aws/stub"
 	"github.com/stretchr/testify/require"
 )
 

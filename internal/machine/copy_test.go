@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goke/outpost/internal/machine"
+	"github.com/degoke/outpost/internal/machine"
 	"github.com/stretchr/testify/require"
 )
 

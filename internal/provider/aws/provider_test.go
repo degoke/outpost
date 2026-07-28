@@ -3,7 +3,7 @@ package aws_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/provider"
+	"github.com/degoke/outpost/internal/provider"
 	"github.com/stretchr/testify/require"
 )
 

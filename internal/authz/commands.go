@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 )
 
 // RequireMemberAllowed checks whether a member-role host may run the given command path.

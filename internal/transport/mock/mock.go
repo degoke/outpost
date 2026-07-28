@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 type Executor struct {

@@ -2,16 +2,16 @@
 # Install Outpost from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/goke/outpost/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install.sh | bash
 #
 # Environment:
 #   OUTPOST_VERSION   Release tag (e.g. v0.1.0) or "latest" (default)
 #   OUTPOST_INSTALL_DIR  Install directory (default: $HOME/.local/bin)
-#   OUTPOST_REPO      GitHub repo (default: goke/outpost)
+#   OUTPOST_REPO      GitHub repo (default: degoke/outpost)
 
 set -euo pipefail
 
-REPO="${OUTPOST_REPO:-goke/outpost}"
+REPO="${OUTPOST_REPO:-degoke/outpost}"
 VERSION="${OUTPOST_VERSION:-latest}"
 INSTALL_DIR="${OUTPOST_INSTALL_DIR:-${HOME}/.local/bin}"
 BINARY_NAME="outpost"

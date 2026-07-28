@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 func (r *Runner) Shell(ctx context.Context) error {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 )
 
 const remoteBase = config.DefaultRemoteBase + "/clusters"

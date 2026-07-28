@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )

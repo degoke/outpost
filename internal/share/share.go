@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/transport"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"

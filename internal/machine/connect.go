@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/goke/outpost/internal/connect"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/connect"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 type ConnectForward struct {

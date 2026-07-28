@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/transport/mock"
-	"github.com/goke/outpost/internal/upload"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/transport/mock"
+	"github.com/degoke/outpost/internal/upload"
 	"github.com/stretchr/testify/require"
 )
 

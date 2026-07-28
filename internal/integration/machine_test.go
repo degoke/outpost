@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/goke/outpost/internal/machine"
-	"github.com/goke/outpost/internal/transport/mock"
+	"github.com/degoke/outpost/internal/machine"
+	"github.com/degoke/outpost/internal/transport/mock"
 	"github.com/stretchr/testify/require"
 )
 

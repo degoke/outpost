@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goke/outpost/internal/bootstrap"
-	"github.com/goke/outpost/internal/capacity"
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/inspect"
-	"github.com/goke/outpost/internal/output"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/bootstrap"
+	"github.com/degoke/outpost/internal/capacity"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/output"
+	"github.com/degoke/outpost/internal/transport"
 	"gopkg.in/yaml.v3"
 )
 

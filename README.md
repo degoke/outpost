@@ -34,13 +34,13 @@ When you run `outpost compose up`, Outpost uploads your compose files (and `.env
 **Install script** (macOS and Linux):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/goke/outpost/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install.sh | bash
 ```
 
 Pin a version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/goke/outpost/main/scripts/install.sh | OUTPOST_VERSION=v0.1.0 bash
+curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install.sh | OUTPOST_VERSION=v0.1.0 bash
 ```
 
 The script installs to `~/.local/bin` by default. Override with `OUTPOST_INSTALL_DIR`.
@@ -48,10 +48,10 @@ The script installs to `~/.local/bin` by default. Override with `OUTPOST_INSTALL
 **From source** (requires Go 1.26+):
 
 ```bash
-go install github.com/goke/outpost/cmd/outpost@latest
+go install github.com/degoke/outpost/cmd/outpost@latest
 ```
 
-**Manual download** — binaries for each platform are on [GitHub Releases](https://github.com/goke/outpost/releases).
+**Manual download** — binaries for each platform are on [GitHub Releases](https://github.com/degoke/outpost/releases).
 
 ## Requirements
 

@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/config"
 )
 
 const (

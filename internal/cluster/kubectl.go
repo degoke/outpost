@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 func RunKubectl(ctx context.Context, exec transport.Executor, clusterName string, args []string) (int, error) {

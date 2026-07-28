@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/goke/outpost/internal/provider/aws"
+	"github.com/degoke/outpost/internal/provider/aws"
 	"github.com/stretchr/testify/require"
 )
 

@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goke/outpost/internal/authz"
-	"github.com/goke/outpost/internal/bootstrap"
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/output"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/authz"
+	"github.com/degoke/outpost/internal/bootstrap"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/output"
+	"github.com/degoke/outpost/internal/transport"
 	"github.com/google/uuid"
 )
 

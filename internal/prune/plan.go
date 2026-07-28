@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/goke/outpost/internal/config"
-	"github.com/goke/outpost/internal/inspect"
-	"github.com/goke/outpost/internal/machine"
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/inspect"
+	"github.com/degoke/outpost/internal/machine"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 type Candidate struct {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 func Run(ctx context.Context, exec transport.Executor, args []string) (int, error) {

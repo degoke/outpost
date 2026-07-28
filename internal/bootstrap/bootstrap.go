@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/goke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/transport"
 )
 
 const bootstrapScript = `

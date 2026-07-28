@@ -3,8 +3,8 @@ package authz_test
 import (
 	"testing"
 
-	"github.com/goke/outpost/internal/authz"
-	"github.com/goke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/authz"
+	"github.com/degoke/outpost/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

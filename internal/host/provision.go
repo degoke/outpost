@@ -1,6 +1,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -94,7 +95,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 		hostname = result.PublicIP
 	}
 	s.Out.Info("Waiting for SSH on %s...", hostname)
-	if err := waitForSSH(ctx, hostname, outpostUser, privPath, s.Out); err != nil {
+	if err := waitForSSH(ctx, hostname, outpostUser, privPath); err != nil {
 		if !opts.NoCleanup {
 			s.Out.Info("Cleaning up failed instance...")
 			_ = prov.Destroy(ctx, &config.ProviderMeta{
@@ -107,12 +108,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 	}
 
 	s.Out.Info("Bootstrapping remote host...")
-	exec, err := transport.NewSSH(transport.SSHConfig{
-		Hostname:     hostname,
-		User:         outpostUser,
-		Port:         22,
-		IdentityFile: privPath,
-	})
+	exec, err := transport.NewSSH(provisionSSHConfig(hostname, outpostUser, privPath))
 	if err != nil {
 		return err
 	}
@@ -160,8 +156,6 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 	s.Out.Success("Host %q created and ready at %s", opts.Name, hostname)
 	return nil
 }
-
-const outpostUser = "outpost"
 
 func (s *Service) Start(ctx context.Context, name string) error {
 	h, prov, err := s.awsProvisioner(ctx, name)
@@ -273,24 +267,40 @@ func (s *Service) awsProvisioner(ctx context.Context, name string) (*config.Host
 	return h, prov, nil
 }
 
-func waitForSSH(ctx context.Context, hostname, user, identityFile string, out *output.Printer) error {
-	deadline := time.Now().Add(5 * time.Minute)
+const outpostUser = "outpost"
+
+const provisionSSHTimeout = 10 * time.Minute
+
+func provisionSSHConfig(hostname, user, identityFile string) transport.SSHConfig {
+	return transport.SSHConfig{
+		Hostname:         hostname,
+		User:             user,
+		Port:             22,
+		IdentityFile:     identityFile,
+		AutoTrustHostKey: true,
+	}
+}
+
+func waitForSSH(ctx context.Context, hostname, user, identityFile string) error {
+	deadline := time.Now().Add(provisionSSHTimeout)
 	var lastErr error
+	cfg := provisionSSHConfig(hostname, user, identityFile)
 	for time.Now().Before(deadline) {
-		exec, err := transport.NewSSH(transport.SSHConfig{
-			Hostname:     hostname,
-			User:         user,
-			Port:         22,
-			IdentityFile: identityFile,
-		})
+		exec, err := transport.NewSSH(cfg)
 		if err == nil {
-			code, runErr := exec.Run(ctx, "echo OUTPOST_SSH_OK", transport.RunOpts{})
+			var stdout bytes.Buffer
+			code, runErr := exec.Run(ctx, "echo OUTPOST_SSH_OK", transport.RunOpts{
+				Stdout: &stdout,
+				Stderr: io.Discard,
+			})
 			exec.Close()
-			if runErr == nil && code == 0 {
+			if runErr == nil && code == 0 && strings.TrimSpace(stdout.String()) == "OUTPOST_SSH_OK" {
 				return nil
 			}
 			if runErr != nil {
 				lastErr = runErr
+			} else {
+				lastErr = fmt.Errorf("unexpected SSH probe response: %q", stdout.String())
 			}
 		} else {
 			lastErr = err
@@ -302,9 +312,9 @@ func waitForSSH(ctx context.Context, hostname, user, identityFile string, out *o
 		}
 	}
 	if lastErr != nil {
-		return fmt.Errorf("SSH not ready after timeout: %w", lastErr)
+		return fmt.Errorf("SSH not ready after %s: %w", provisionSSHTimeout, lastErr)
 	}
-	return fmt.Errorf("SSH not ready after timeout connecting to %s@%s", user, hostname)
+	return fmt.Errorf("SSH not ready after %s connecting to %s@%s", provisionSSHTimeout, user, hostname)
 }
 
 func detectPublicIPCIDR() (string, error) {

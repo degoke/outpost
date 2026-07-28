@@ -16,7 +16,19 @@ import (
 const (
 	defaultInstanceType = "t3.medium"
 	sshWaitTimeout      = 5 * time.Minute
+
+	ubuntuOwnerID = "099720109477"
 )
+
+var ubuntuAMINamePatterns = []string{
+	"ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
+	"ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*",
+}
+
+// UbuntuAMINamePatternsForTest exposes AMI name filters for tests.
+func UbuntuAMINamePatternsForTest() []string {
+	return append([]string(nil), ubuntuAMINamePatterns...)
+}
 
 type rollbackState struct {
 	instanceID    string
@@ -102,9 +114,9 @@ func (p *Provisioner) Create(ctx context.Context, opts provider.CreateOpts) (*pr
 
 func (p *Provisioner) findUbuntuAMI(ctx context.Context) (string, error) {
 	out, err := p.ec2.DescribeImages(ctx, &ec2.DescribeImagesInput{
-		Owners: []string{"099720109477"},
+		Owners: []string{ubuntuOwnerID},
 		Filters: []ec2types.Filter{
-			{Name: aws.String("name"), Values: []string{"ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*"}},
+			{Name: aws.String("name"), Values: ubuntuAMINamePatterns},
 			{Name: aws.String("state"), Values: []string{"available"}},
 			{Name: aws.String("architecture"), Values: []string{"x86_64"}},
 		},

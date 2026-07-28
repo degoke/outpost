@@ -9,6 +9,9 @@ import (
 )
 
 func (r *Runner) Shell(ctx context.Context) error {
+	if err := transport.EnsureRemoteDir(r.Exec, r.Proj.RemoteDir); err != nil {
+		return err
+	}
 	venvExists, err := r.RemoteVenvPython(ctx)
 	if err != nil {
 		return err

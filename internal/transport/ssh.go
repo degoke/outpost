@@ -119,8 +119,44 @@ func (e *SSHExecutor) Run(ctx context.Context, cmd string, opts RunOpts) (int, e
 	} else {
 		session.Stderr = os.Stderr
 	}
+
 	if opts.Stdin != nil {
-		session.Stdin = opts.Stdin
+		stdinPipe, err := session.StdinPipe()
+		if err != nil {
+			return 1, err
+		}
+		if err := session.Start(cmd); err != nil {
+			return 1, err
+		}
+		copyErr := make(chan error, 1)
+		go func() {
+			_, err := io.Copy(stdinPipe, opts.Stdin)
+			closeErr := stdinPipe.Close()
+			if err != nil {
+				copyErr <- err
+				return
+			}
+			copyErr <- closeErr
+		}()
+		errCh := make(chan error, 1)
+		go func() { errCh <- session.Wait() }()
+		select {
+		case err = <-errCh:
+		case <-ctx.Done():
+			_ = session.Close()
+			<-errCh
+			return 1, ctx.Err()
+		}
+		if copyErr := <-copyErr; copyErr != nil {
+			return 1, copyErr
+		}
+		if err == nil {
+			return 0, nil
+		}
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			return exitErr.ExitStatus(), nil
+		}
+		return 1, err
 	}
 
 	if err := session.Start(cmd); err != nil {
@@ -215,6 +251,10 @@ func shellQuote(s string) string {
 }
 
 func (e *SSHExecutor) Upload(local, remote string) error {
+	return e.UploadWithProgress(local, remote, nil)
+}
+
+func (e *SSHExecutor) UploadWithProgress(local, remote string, out io.Writer) error {
 	client, err := e.connect()
 	if err != nil {
 		return err
@@ -233,12 +273,16 @@ func (e *SSHExecutor) Upload(local, remote string) error {
 		return err
 	}
 	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
 	dst, err := sftpClient.Create(remote)
 	if err != nil {
 		return err
 	}
 	defer dst.Close()
-	_, err = io.Copy(dst, src)
+	_, err = CopyWithProgress(dst, src, info.Size(), "Uploading to host", out, nil)
 	return err
 }
 
@@ -280,6 +324,41 @@ func (e *SSHExecutor) Download(remote string) ([]byte, error) {
 	}
 	defer f.Close()
 	return io.ReadAll(f)
+}
+
+func (e *SSHExecutor) DownloadTo(local, remote string) error {
+	return e.DownloadToWithProgress(local, remote, nil)
+}
+
+func (e *SSHExecutor) DownloadToWithProgress(local, remote string, out io.Writer) error {
+	client, err := e.connect()
+	if err != nil {
+		return err
+	}
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+	src, err := sftpClient.Open(remote)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
+		return err
+	}
+	dst, err := os.Create(local)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = CopyWithProgress(dst, src, info.Size(), "Downloading from host", out, nil)
+	return err
 }
 
 func ensureRemoteDir(c *sftp.Client, dir string) error {

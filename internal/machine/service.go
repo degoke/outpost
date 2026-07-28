@@ -111,7 +111,7 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 		return err
 	}
 
-	if err := s.validateImage(ctx, opts.Image); err != nil {
+	if err := s.ensureImage(ctx, opts.Image); err != nil {
 		return err
 	}
 
@@ -119,12 +119,14 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 	diskLimit := FormatSize(opts.DiskBytes)
 	launchParts := []string{
 		"incus launch",
-		shellQuote(opts.Image),
+		shellQuote(incusLocalImageRef(opts.Image)),
 		shellQuote(incusName),
-		fmt.Sprintf("-c limits.cpu=%g", opts.CPU),
+	}
+	launchParts = append(launchParts, incusLaunchCPUFlags(opts.CPU, opts.VirtualMachine)...)
+	launchParts = append(launchParts,
 		fmt.Sprintf("-c limits.memory=%s", memLimit),
 		fmt.Sprintf("-d root,size=%s", diskLimit),
-	}
+	)
 	if opts.VirtualMachine {
 		launchParts = append(launchParts, "--vm")
 	}
@@ -320,18 +322,6 @@ func (s *Service) DeleteInfo(ctx context.Context, name string) (*DeleteInfo, err
 		}
 	}
 	return info, nil
-}
-
-func (s *Service) validateImage(ctx context.Context, image string) error {
-	cmd := fmt.Sprintf("incus image info %s >/dev/null 2>&1", shellQuote(image))
-	code, err := s.Exec.Run(ctx, cmd, transport.RunOpts{})
-	if err != nil {
-		return err
-	}
-	if code != 0 {
-		return fmt.Errorf("image %q not found on host — run 'incus image list' on the host or choose a different alias", image)
-	}
-	return nil
 }
 
 func (s *Service) instanceDiskBytes(ctx context.Context, incusName string) (uint64, error) {

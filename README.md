@@ -31,13 +31,27 @@ When you run `outpost compose up`, Outpost uploads your compose files (and `.env
 
 ## Install
 
+**Install script** (macOS and Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/goke/outpost/main/scripts/install.sh | bash
+```
+
+Pin a version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/goke/outpost/main/scripts/install.sh | OUTPOST_VERSION=v0.1.0 bash
+```
+
+The script installs to `~/.local/bin` by default. Override with `OUTPOST_INSTALL_DIR`.
+
 **From source** (requires Go 1.26+):
 
 ```bash
 go install github.com/goke/outpost/cmd/outpost@latest
 ```
 
-**From a release** — download the binary for your platform from [GitHub Releases](https://github.com/goke/outpost/releases).
+**Manual download** — binaries for each platform are on [GitHub Releases](https://github.com/goke/outpost/releases).
 
 ## Requirements
 
@@ -218,7 +232,7 @@ Members can run workloads (`docker`, `compose`, `connect`, `kubectl`, etc.) but 
 | `docker`, `compose`, `connect`               | Manage hosts or invitations                     |
 | `status`, `top`, `capacity`, `disk`, `prune` | `init`, `host create/destroy`, `provider login` |
 | `cluster list`, `kubectl`                    | `cluster create/delete`                         |
-| `machine shell`, `machine exec`              | `machine create/delete`                         |
+| `machine shell`, `machine exec`, `machine copy`, `machine connect` | `machine create/delete`                         |
 
 
 
@@ -274,6 +288,9 @@ outpost machine create ubuntu-dev --image ubuntu:24.04
 outpost machine create big-dev --image ubuntu:24.04 --cpu 2 --memory 2GiB --disk 20GiB
 outpost machine shell ubuntu-dev
 outpost machine exec ubuntu-dev -- uname -a
+outpost machine copy ./app ubuntu-dev:/tmp/app
+outpost machine copy ubuntu-dev:/tmp/output.log ./output.log
+outpost machine connect ubuntu-dev --port 8080:80
 outpost machine stop ubuntu-dev
 outpost machine snapshot create ubuntu-dev
 outpost machine delete ubuntu-dev

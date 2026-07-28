@@ -48,7 +48,7 @@ func memberAllowedPath(cmdPath string) bool {
 			return false
 		}
 		switch parts[1] {
-		case "list", "status", "shell", "exec", "start", "stop", "restart":
+		case "list", "status", "shell", "exec", "copy", "connect", "start", "stop", "restart":
 			return true
 		case "snapshot":
 			if len(parts) >= 3 && parts[2] == "create" {

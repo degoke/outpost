@@ -1343,6 +1343,8 @@ func (app *App) machineCmd() *cobra.Command {
 	cmd.AddCommand(app.machineRestartCmd())
 	cmd.AddCommand(app.machineShellCmd())
 	cmd.AddCommand(app.machineExecCmd())
+	cmd.AddCommand(app.machineCopyCmd())
+	cmd.AddCommand(app.machineConnectCmd())
 	cmd.AddCommand(app.machineSnapshotCmd())
 	cmd.AddCommand(app.machineDeleteCmd())
 	return cmd
@@ -1522,6 +1524,58 @@ func (app *App) machineExecCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+func (app *App) machineCopyCmd() *cobra.Command {
+	var recursive bool
+	cmd := &cobra.Command{
+		Use:   "copy SRC DST",
+		Short: "Copy files between your computer and a machine",
+		Long:  "Use NAME:/path for machine paths, e.g. outpost machine copy ./app ubuntu-dev:/tmp/app",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				return svc.Copy(ctx, args[0], args[1], recursive)
+			})
+		},
+	}
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "recursively copy directories")
+	return cmd
+}
+
+func (app *App) machineConnectCmd() *cobra.Command {
+	var portSpecs []string
+	var bindHost string
+	cmd := &cobra.Command{
+		Use:   "connect NAME",
+		Short: "Forward ports from a machine to localhost",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
+				forwards, closers, err := svc.StartConnect(ctx, args[0], portSpecs, bindHost)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(forwards)
+				}
+				for _, f := range forwards {
+					app.Out.Success("%s -> machine port %d", f.URL, f.RemotePort)
+				}
+				app.Out.Info("Press Ctrl+C to stop forwarding")
+				sigCh := make(chan os.Signal, 1)
+				signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+				<-sigCh
+				for _, c := range closers {
+					c.Close()
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringArrayVar(&portSpecs, "port", nil, "port mapping (local:remote or just remote)")
+	cmd.Flags().StringVar(&bindHost, "bind", "127.0.0.1", "local address to bind")
+	return cmd
 }
 
 func (app *App) machineSnapshotCmd() *cobra.Command {

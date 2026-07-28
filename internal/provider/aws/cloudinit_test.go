@@ -17,9 +17,9 @@ func TestCloudInitUserData(t *testing.T) {
 	script := string(decoded)
 	require.Contains(t, script, "ssh-ed25519 AAAA test")
 	require.Contains(t, script, "outpost")
-	require.Contains(t, script, "docker")
-	require.Contains(t, script, "kind")
 	require.Contains(t, script, "machines")
+	require.Contains(t, script, "OUTPOST_CLOUD_INIT_OK")
+	require.NotContains(t, script, "install_docker_debian")
 }
 
 func TestCloudInitIsBase64(t *testing.T) {

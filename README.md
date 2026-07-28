@@ -372,3 +372,7 @@ These flags work on every command:
 | Start over locally       | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept.        |
 
 
+## License
+
+Outpost is open source software licensed under the [MIT License](LICENSE).
+

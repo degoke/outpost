@@ -934,7 +934,6 @@ function Home() {
     <>
       <section className="hero wrap grid-bg">
         <div>
-          <div className="eyebrow">Remote development / local control</div>
           <h1>
             Your remote dev environment. <span>Anywhere.</span>
           </h1>

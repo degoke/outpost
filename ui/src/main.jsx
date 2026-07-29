@@ -83,8 +83,27 @@ const groups = [
   [
     "getting-started",
     "Getting started",
-    "Connect a host, initialize a project, and start a remote stack.",
+    "Install the CLI, connect a host, initialize a project, and start a remote stack.",
     [
+      [
+        "Install the CLI",
+        [
+          [
+            "curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install.sh | bash",
+            "Install on macOS or Linux",
+          ],
+          [
+            "go install github.com/degoke/outpost/cmd/outpost@latest",
+            "Install from source with Go 1.26+",
+          ],
+          ["outpost --help", "Verify the CLI and view commands"],
+          [
+            'outpost completion zsh > "${fpath[1]}/_outpost"',
+            "Enable shell completion",
+          ],
+        ],
+        "Install Outpost locally, verify it, and generate completion for bash, zsh, fish, or powershell.",
+      ],
       [
         "Use an existing host",
         [
@@ -142,7 +161,7 @@ const groups = [
         "Select a host",
         [
           ["outpost host use dev", "Set the active host"],
-          ["outpost host use --host work", "Target a host on a single command"],
+          ["outpost --host work status", "Target a host on a single command"],
         ],
         "Set the active host, or target a host on an individual command with --host NAME.",
       ],
@@ -453,6 +472,146 @@ const groups = [
       ],
     ],
   ],
+  [
+    "reference",
+    "Command reference",
+    "Every command, including passthrough tools and local configuration.",
+    [
+      [
+        "Remote runtime commands",
+        [
+          ["outpost docker [args...]", "Run any Docker command remotely"],
+          [
+            "outpost compose build|pull|up|down|ps|logs|exec",
+            "Run Compose commands remotely",
+          ],
+          [
+            "outpost kubectl --cluster NAME [args...]",
+            "Run any kubectl command remotely",
+          ],
+          ["outpost connect [flags]", "Forward Compose ports to localhost"],
+        ],
+        "Docker, Compose, and kubectl pass their remaining arguments to the remote tool, so the full underlying command surface remains available.",
+      ],
+      [
+        "Host and provider commands",
+        [
+          [
+            "outpost provider login aws [flags]",
+            "Validate and store AWS credentials",
+          ],
+          ["outpost host add|create NAME", "Register or provision a host"],
+          [
+            "outpost host list|use|verify|capabilities",
+            "Inspect and select hosts",
+          ],
+          [
+            "outpost host start|stop|restart|resize NAME",
+            "Manage a cloud host",
+          ],
+          [
+            "outpost host remove|destroy NAME",
+            "Forget locally or terminate remotely",
+          ],
+        ],
+        "Use remove to delete local registration only; use destroy to terminate a cloud host. Host creation also supports --provider, --region, --profile, --instance-type, --ssh-cidr, and --no-cleanup.",
+      ],
+      [
+        "Projects, mirrors, and sessions",
+        [
+          ["outpost init [flags]", "Create .outpost/project.yaml"],
+          ["outpost mirror sync|shell", "Sync or open the remote project"],
+          [
+            "outpost mirror setup-python [flags]",
+            "Create a remote Python environment",
+          ],
+          [
+            "outpost mirror run [flags] -- COMMAND",
+            "Run a remote project command",
+          ],
+          [
+            "outpost mirror sessions list|status|attach|kill",
+            "Manage detached sessions",
+          ],
+        ],
+        "Use --no-sync and --no-venv with mirror run when you need to control synchronization and virtual-environment activation.",
+      ],
+      [
+        "Clusters and machines",
+        [
+          ["outpost cluster create|list|status|delete", "Manage kind clusters"],
+          [
+            "outpost machine create|list|status",
+            "Create and inspect Incus machines",
+          ],
+          [
+            "outpost machine start|stop|restart NAME",
+            "Manage machine lifecycle",
+          ],
+          [
+            "outpost machine shell|exec|copy|connect",
+            "Work inside or connect to a machine",
+          ],
+          [
+            "outpost machine snapshot create|list|delete",
+            "Manage machine snapshots",
+          ],
+          ["outpost machine delete NAME", "Delete a machine"],
+        ],
+        "Machine create accepts --image, --cpu, --memory, --disk, and --virtual-machine. Copy accepts --recursive/-r; connect accepts --port and --bind.",
+      ],
+      [
+        "Sharing, cleanup, and local tools",
+        [
+          [
+            "outpost invite create|join|list|approve|revoke",
+            "Manage team access",
+          ],
+          ["outpost capacity|status|top|disk", "Inspect health and resources"],
+          [
+            "outpost prune [volumes|clusters|machines]",
+            "Preview or reclaim resources",
+          ],
+          ["outpost reset", "Clear local Outpost configuration"],
+          ["outpost completion SHELL", "Generate shell completion"],
+          ["outpost help [COMMAND]", "Open built-in command help"],
+        ],
+        "Run prune with --dry-run first. The explicit target forms support --force; destructive actions should be reviewed before using --yes.",
+      ],
+    ],
+  ],
+  [
+    "options",
+    "Using any command",
+    "Common flags belong with the command they modify and work across the command surface.",
+    [
+      [
+        "Target and inspect",
+        [
+          [
+            "outpost --host NAME status",
+            "Target a host without changing the active host",
+          ],
+          ["outpost --json status", "Return machine-readable JSON"],
+          ["outpost --debug host verify", "Show verbose diagnostics"],
+          ["outpost --help", "Show help for the current command"],
+        ],
+        "Place --host, --json, --debug, --yes, or --help with the command you are running. They are not a separate command family.",
+      ],
+      [
+        "Confirm safely",
+        [
+          ["outpost prune --dry-run", "Preview cleanup candidates"],
+          [
+            "outpost prune volumes --force --yes",
+            "Confirm an explicit volume cleanup",
+          ],
+          ["outpost host destroy NAME", "Review the termination prompt"],
+        ],
+        "Use --yes for trusted automation or after reviewing the consequence. Shared-host operations warn when other members may be affected.",
+      ],
+    ],
+  ],
 ];
 
 function commandCopyText(lines) {
@@ -587,7 +746,6 @@ function Header({ usage }) {
       <nav className="wrap">
         <Logo />
         <div className="nav-links">
-          <a href="#how-it-works">How it works</a>
           <a className={usage ? "active" : ""} href="#usage">
             Usage guide
           </a>
@@ -939,8 +1097,11 @@ function Home() {
           </h1>
           <p className="lead">
             Outpost turns a remote Linux host into a shared development
-            environment you control from your local terminal. Keep your local
-            workflow light and move the runtime to a remote machine.
+            environment you control from your local terminal.
+            <span className="stacked-line">
+              Keep your local workflow light and move the runtime to a remote
+              machine.
+            </span>
           </p>
           <div className="actions">
             <CopyCommand
@@ -956,7 +1117,10 @@ function Home() {
         <div className="wrap architecture">
           <div>
             <div className="eyebrow">The connection</div>
-            <h2>You stay local. Outpost runs it there.</h2>
+            <h2>
+              Local workflow.
+              <span className="stacked-line">Remote runtime.</span>
+            </h2>
             <p className="arch-copy">
               Outpost connects over SSH, bootstraps missing tools on first use,
               mirrors project files, and brings services back to your localhost.
@@ -986,7 +1150,7 @@ function Home() {
             <div>
               <div className="eyebrow">Start from where you are</div>
               <h2>
-                Use an existing server. Or provision one on{" "}
+                Bring your VPS. Or provision one on{" "}
                 <RotatingText items={["AWS", "Digital Ocean", "GCP"]} />.
               </h2>
             </div>
@@ -1002,7 +1166,10 @@ function Home() {
         <div className="wrap cta-inner">
           <div>
             <div className="eyebrow">&gt;_ Keep your laptop light.</div>
-            <h2>Develop remotely. Ship from anywhere.</h2>
+            <h2>
+              Develop remotely.
+              <span className="stacked-line">Work from anywhere.</span>
+            </h2>
           </div>
           <CopyCommand
             command={INSTALL_COMMAND}
@@ -1066,32 +1233,6 @@ function Usage() {
                 <CommandSnippet lines={lines} title={title} />
               </article>
             ))}
-          </div>
-        </div>
-      </section>
-      <section className="usage-notes">
-        <div className="wrap notes-grid">
-          <div>
-            <div className="eyebrow">Global options</div>
-            <h2>Useful everywhere.</h2>
-          </div>
-          <div className="options">
-            <div>
-              <code>--host NAME</code>
-              <span>Target a specific host instead of the active one.</span>
-            </div>
-            <div>
-              <code>--json</code>
-              <span>Print machine-readable JSON output.</span>
-            </div>
-            <div>
-              <code>--debug</code>
-              <span>Show verbose logging for inspection.</span>
-            </div>
-            <div>
-              <code>--yes</code>
-              <span>Skip confirmation prompts.</span>
-            </div>
           </div>
         </div>
       </section>

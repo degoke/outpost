@@ -1,6 +1,6 @@
 # Outpost
 
-> Terminal-first remote development. You stay local. Outpost runs it there.
+> Terminal-first remote development. Local workflow. Remote runtime.
 
 Outpost turns a remote Linux host into a shared development environment you control from your local terminal. Run Docker Compose stacks, Kubernetes (kind) clusters, and lightweight Linux machines on infrastructure you own — without installing Docker, kubectl, or a local VM stack on your laptop.
 

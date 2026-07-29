@@ -1,0 +1,41 @@
+# Outpost
+
+> Terminal-first remote development. You stay local. Outpost runs it there.
+
+Outpost turns a remote Linux host into a shared development environment you control from your local terminal. Run Docker Compose stacks, Kubernetes (kind) clusters, and lightweight Linux machines on infrastructure you own — without installing Docker, kubectl, or a local VM stack on your laptop.
+
+## Primary pages
+
+- [Home](/): Product overview, install command, capabilities, and workflow
+- [Usage guide](/#usage): Complete CLI reference for hosts, projects, clusters, machines, connections, and teams
+- [GitHub repository](https://github.com/degoke/outpost): Source code, issues, and releases
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install.sh | bash
+```
+
+## Core commands
+
+- `outpost host add` — register an existing Linux host over SSH
+- `outpost host create` — provision a host on AWS
+- `outpost init` — initialize a project on the active host
+- `outpost compose up` — run Docker Compose remotely
+- `outpost connect` — forward remote services to localhost
+- `outpost cluster create` — create a kind Kubernetes cluster on the host
+- `outpost machine create` — launch Incus containers or VMs
+- `outpost mirror sync` — sync a repository and run commands remotely
+- `outpost invite create` — share host access with teammates
+
+## Product facts
+
+- Connects over SSH; no permanent Outpost agent on the server
+- Supports existing hosts or AWS-provisioned EC2 instances
+- macOS and Linux CLI
+- Open source: https://github.com/degoke/outpost
+
+## Optional
+
+- [Full README](https://github.com/degoke/outpost/blob/main/README.md): Detailed documentation
+- [Install script](https://github.com/degoke/outpost/blob/main/scripts/install.sh): Bootstrap installer

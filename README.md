@@ -1,5 +1,9 @@
 # Outpost
 
+<p align="center">
+  <img src="./outpost.png" alt="Outpost — remote power, local control" width="640" />
+</p>
+
 Outpost turns a remote Linux host into a shared development environment you control from your local terminal. Run Docker Compose stacks, Kubernetes clusters, and lightweight Linux machines on the server — without installing Docker, `kubectl`, or a local VM stack on your laptop.
 
 Use an existing Linux server or let Outpost provision one on AWS. Share the host with teammates through invitation codes; collaborators get runtime access without your cloud credentials.

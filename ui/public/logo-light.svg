@@ -1,0 +1,20 @@
+<svg width="980" height="220" viewBox="0 0 980 220" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Outpost logo light</title>
+  <desc id="desc">Outpost logo with electric blue prompt mark and dark wordmark on transparent background.</desc>
+  <defs>
+    <style>
+      .wordmark {
+        font-family: "Space Grotesk", "Inter", "Segoe UI", Arial, sans-serif;
+        font-size: 86px;
+        font-weight: 500;
+        letter-spacing: 1px;
+      }
+    </style>
+  </defs>
+
+  <path d="M54 58L112 88L54 118" stroke="#2563FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M76 146H130" stroke="#2563FF" stroke-width="16" stroke-linecap="round"/>
+  <path d="M166 40V164" stroke="#CBD5E1" stroke-opacity="0.5" stroke-width="2"/>
+
+  <text x="205" y="122" class="wordmark" fill="#050A16">outpost</text>
+</svg>

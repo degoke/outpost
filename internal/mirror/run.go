@@ -16,6 +16,7 @@ type RunOptions struct {
 	NoSync      bool
 	ForceSync   bool
 	NoVenv      bool
+	NoToolchain bool
 	Command     string
 }
 
@@ -51,6 +52,12 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	cmd := opts.Command
 	if strings.TrimSpace(cmd) == "" {
 		return RunResult{ExitCode: 1}, fmt.Errorf("command is required")
+	}
+
+	var err error
+	cmd, err = r.ensureToolchainForRun(ctx, cmd, opts.NoToolchain)
+	if err != nil {
+		return RunResult{ExitCode: 1}, err
 	}
 
 	venvExists, err := r.RemoteVenvPython(ctx)

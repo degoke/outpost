@@ -29,3 +29,28 @@ func TestProjectRequireCompose(t *testing.T) {
 	require.Error(t, (&config.Project{}).RequireCompose())
 	require.NoError(t, (&config.Project{ComposeFiles: []string{"docker-compose.yml"}}).RequireCompose())
 }
+
+func TestProjectToolchainYAML(t *testing.T) {
+	data := []byte(`
+version: 1
+name: demo
+remote_dir: /var/lib/outpost/projects/demo
+compose_files: []
+toolchain:
+  packages: [make, git]
+  go: "1.22.5"
+  auto: true
+`)
+	var p config.Project
+	require.NoError(t, yaml.Unmarshal(data, &p))
+	require.NotNil(t, p.Toolchain)
+	require.Equal(t, []string{"make", "git"}, p.Toolchain.Packages)
+	require.Equal(t, "1.22.5", p.Toolchain.Go)
+	require.True(t, p.ToolchainAuto())
+}
+
+func TestProjectToolchainAutoDisabled(t *testing.T) {
+	auto := false
+	p := &config.Project{Toolchain: &config.ProjectToolchain{Auto: &auto}}
+	require.False(t, p.ToolchainAuto())
+}

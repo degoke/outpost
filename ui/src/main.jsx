@@ -352,6 +352,28 @@ const groups = [
         ],
         "Create a remote-only virtual environment and work inside it. The local .venv is never synced.",
       ],
+      [
+        "Install build tools remotely",
+        [
+          [
+            "outpost mirror toolchain plan",
+            "Preview packages and Go versions to install",
+          ],
+          [
+            "outpost mirror setup-toolchain",
+            "Install detected toolchain on the remote host",
+          ],
+          [
+            "outpost mirror run -- make build",
+            "Auto-install missing tools before running",
+          ],
+          [
+            "outpost mirror run --no-toolchain -- make build",
+            "Skip toolchain installation",
+          ],
+        ],
+        "Detect make, Go, and other build tools from go.mod, Makefile, and project.yaml. Installs to /var/lib/outpost/toolchains/ on the remote host.",
+      ],
     ],
   ],
   [
@@ -611,6 +633,14 @@ const groups = [
           [
             "outpost mirror setup-python [--rsync] [--workers N]",
             "Create a remote Python environment",
+          ],
+          [
+            "outpost mirror setup-toolchain [--rsync] [--workers N]",
+            "Install project toolchain on the remote host",
+          ],
+          [
+            "outpost mirror toolchain plan [COMMAND]",
+            "Preview toolchain requirements",
           ],
           [
             "outpost mirror run [flags] -- COMMAND",

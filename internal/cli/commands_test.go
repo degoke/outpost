@@ -108,6 +108,7 @@ func TestCLICommands(t *testing.T) {
 		{name: "compose volumes list", args: []string{"compose", "volumes", "list"}},
 		{name: "mirror sync", args: []string{"mirror", "sync"}},
 		{name: "mirror run no-sync", args: []string{"mirror", "run", "--no-sync", "--", "echo", "hello"}},
+		{name: "mirror toolchain plan", args: []string{"mirror", "toolchain", "plan"}},
 		{name: "mirror sessions list", args: []string{"mirror", "sessions", "list"}},
 		{name: "connect status", args: []string{"connect", "--status"}},
 		{name: "connect down no session", args: []string{"connect", "--down"}, wantErr: true},
@@ -153,6 +154,7 @@ var untestableCLICommands = map[string]string{
 	"mirror watch":             "blocks until interrupted",
 	"mirror shell":             "interactive TTY session",
 	"mirror setup-python":      "long-running remote venv bootstrap",
+	"mirror setup-toolchain":   "may install apt packages and Go on remote host",
 	"connect":                  "spawns a background port-forward worker by default",
 	"top --watch":              "blocks until interrupted",
 	"compose up":               "upload + capacity checks + long-running deploy",
@@ -196,33 +198,34 @@ var untestableCLICommands = map[string]string{
 func TestCLICommandCoverage(t *testing.T) {
 	root, _ := cli.NewWithApp()
 	tested := map[string]bool{
-		"host list":            true,
-		"host use":             true,
-		"host remove":          true,
-		"host capabilities":    true,
-		"host create":          true, // error-path smoke test
-		"host destroy":         true,
-		"provider login":       true,
-		"init":                 true,
-		"reset":                true,
-		"status":               true,
-		"top":                  true,
-		"capacity":             true,
-		"disk":                 true,
-		"docker":               true, // exercised via docker ps
-		"compose ps":           true,
-		"compose volumes list": true,
-		"mirror sync":          true,
-		"mirror run":           true,
-		"mirror sessions list": true,
-		"connect":              true, // --status / --down variants
-		"invite list":          true,
-		"invite create":        true,
-		"invite join":          true, // error-path smoke test
-		"cluster list":         true,
-		"machine list":         true,
-		"kubectl":              true,
-		"prune":                true, // --dry-run
+		"host list":             true,
+		"host use":              true,
+		"host remove":           true,
+		"host capabilities":     true,
+		"host create":           true, // error-path smoke test
+		"host destroy":          true,
+		"provider login":        true,
+		"init":                  true,
+		"reset":                 true,
+		"status":                true,
+		"top":                   true,
+		"capacity":              true,
+		"disk":                  true,
+		"docker":                true, // exercised via docker ps
+		"compose ps":            true,
+		"compose volumes list":  true,
+		"mirror sync":           true,
+		"mirror run":            true,
+		"mirror toolchain plan": true,
+		"mirror sessions list":  true,
+		"connect":               true, // --status / --down variants
+		"invite list":           true,
+		"invite create":         true,
+		"invite join":           true, // error-path smoke test
+		"cluster list":          true,
+		"machine list":          true,
+		"kubectl":               true,
+		"prune":                 true, // --dry-run
 	}
 
 	all := collectRunnableCommands(root, nil)

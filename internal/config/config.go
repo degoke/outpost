@@ -72,7 +72,22 @@ type Project struct {
 	ComposeFiles []string            `yaml:"compose_files"`
 	ExtraFiles   []string            `yaml:"extra_files,omitempty"`
 	Python       *ProjectPython      `yaml:"python,omitempty"`
+	Toolchain    *ProjectToolchain   `yaml:"toolchain,omitempty"`
 	Volumes      *ProjectVolumeState `yaml:"volumes,omitempty"`
+}
+
+type ProjectToolchain struct {
+	Packages []string `yaml:"packages,omitempty"`
+	Go       string   `yaml:"go,omitempty"`
+	Auto     *bool    `yaml:"auto,omitempty"`
+}
+
+// ToolchainAuto reports whether mirror run should install missing toolchain deps.
+func (p *Project) ToolchainAuto() bool {
+	if p == nil || p.Toolchain == nil || p.Toolchain.Auto == nil {
+		return true
+	}
+	return *p.Toolchain.Auto
 }
 
 type ProjectPython struct {

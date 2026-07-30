@@ -17,6 +17,12 @@ func TestClusterListIntegration(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{Stdout: "outpost-dev\noutpost-staging\n", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
 	exec.Responses["ls -1 /var/lib/outpost/clusters 2>/dev/null || true"] = struct {
 		Stdout   string
 		Stderr   string

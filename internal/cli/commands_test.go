@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/degoke/outpost/internal/cli"
+	"github.com/degoke/outpost/internal/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +30,7 @@ func TestCLIInit(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	testenv.UseHomeConfigDir(t, home)
 	writeTestGlobal(t, home)
 
 	root, app := cli.NewWithApp()
@@ -46,6 +48,7 @@ func TestCLIInit(t *testing.T) {
 func TestCLIReset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	testenv.UseHomeConfigDir(t, home)
 	writeTestGlobal(t, home)
 
 	root, _ := cli.NewWithApp()
@@ -158,7 +161,7 @@ var untestableCLICommands = map[string]string{
 	"compose pull":             "upload + remote image pull",
 	"compose logs":             "may stream indefinitely",
 	"compose exec":             "interactive session",
-	"cluster create":           "provisions kind cluster on remote host",
+	"cluster create":           "provisions Kubernetes cluster on remote host (kind or k3d)",
 	"cluster delete":           "destructive cluster removal",
 	"cluster status":           "requires an existing cluster name",
 	"machine create":           "provisions Incus instance",

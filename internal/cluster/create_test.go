@@ -18,7 +18,7 @@ func TestCreateRejectsInsufficientCapacity(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{ExitCode: 0}
-	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1"] = struct {
+	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1"] = struct {
 		Stdout   string
 		Stderr   string
 		ExitCode int
@@ -60,6 +60,12 @@ func TestCreateRejectsInsufficientCapacity(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{Stdout: "", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
 	exec.Responses["ls -1 /var/lib/outpost/clusters 2>/dev/null || true"] = struct {
 		Stdout   string
 		Stderr   string
@@ -68,7 +74,7 @@ func TestCreateRejectsInsufficientCapacity(t *testing.T) {
 	}{Stdout: "", ExitCode: 0}
 
 	svc := &cluster.Service{Exec: exec}
-	err := svc.Create(context.Background(), "dev", 4, 1)
+	err := svc.Create(context.Background(), "dev", cluster.DriverKind, 4, 1)
 	require.Error(t, err)
 	require.False(t, exec.HasCommand("kind create cluster"))
 }
@@ -80,7 +86,7 @@ func TestCreateRollsBackOnKindFailure(t *testing.T) {
 		ExitCode       int
 		Err            error
 	}{ExitCode: 0}
-	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1"] = struct {
+	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1"] = struct {
 		Stdout, Stderr string
 		ExitCode       int
 		Err            error
@@ -115,6 +121,12 @@ func TestCreateRollsBackOnKindFailure(t *testing.T) {
 		ExitCode       int
 		Err            error
 	}{Stdout: "", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
 	exec.Responses["ls -1 /var/lib/outpost/clusters 2>/dev/null || true"] = struct {
 		Stdout, Stderr string
 		ExitCode       int
@@ -127,9 +139,74 @@ func TestCreateRollsBackOnKindFailure(t *testing.T) {
 	}{ExitCode: 1, Stderr: "failed"}
 
 	svc := &cluster.Service{Exec: exec}
-	err := svc.Create(context.Background(), "dev", 0, 1)
+	err := svc.Create(context.Background(), "dev", cluster.DriverKind, 0, 1)
 	require.Error(t, err)
 	require.True(t, exec.HasCommand("kind delete cluster"))
+}
+
+func TestCreateRollsBackOnK3dFailure(t *testing.T) {
+	exec := mock.New()
+	exec.Responses["command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{ExitCode: 0}
+	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{ExitCode: 0}
+	exec.Responses["nproc"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "8\n", ExitCode: 0}
+	exec.Responses["free -b | head -2"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "              total        used        free      shared  buff/cache   available\nMem:   17179869184  2147483648 1073741824           0  1073741824 15032385536\n", ExitCode: 0}
+	exec.Responses["df -B1 / | tail -1"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "/dev/root 100000000000 10000000000 90000000000 10% /\n", ExitCode: 0}
+	exec.Responses["head -1 /proc/stat"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "cpu  100 0 50 8500 0 0 0 0 0 0\n", ExitCode: 0}
+	exec.Responses["docker stats --no-stream --format '{{json .}}'"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["kind get clusters 2>/dev/null || true"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["ls -1 /var/lib/outpost/clusters 2>/dev/null || true"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{Stdout: "", ExitCode: 0}
+	exec.Responses["k3d cluster create"] = struct {
+		Stdout, Stderr string
+		ExitCode       int
+		Err            error
+	}{ExitCode: 1, Stderr: "failed"}
+
+	svc := &cluster.Service{Exec: exec}
+	err := svc.Create(context.Background(), "dev", cluster.DriverK3d, 0, 1)
+	require.Error(t, err)
+	require.True(t, exec.HasCommand("k3d cluster delete"))
+	require.False(t, exec.HasCommand("kind create cluster"))
 }
 
 func TestCapacityCheckRejectsLargeRequest(t *testing.T) {
@@ -138,7 +215,7 @@ func TestCapacityCheckRejectsLargeRequest(t *testing.T) {
 		AvailableMem:  512 * 1024 * 1024,
 		AvailableDisk: 1 * 1024 * 1024 * 1024,
 	}
-	cpu, mem, disk := cluster.EstimateResources(1, 4)
+	cpu, mem, disk := cluster.EstimateResources(cluster.DriverKind, 1, 4)
 	err := capacity.CheckWithReport(rep, capacity.Request{CPUCores: cpu, MemoryBytes: mem, DiskBytes: disk})
 	require.Error(t, err)
 }

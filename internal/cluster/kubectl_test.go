@@ -34,6 +34,12 @@ func TestListClustersFromMock(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{Stdout: "outpost-demo\n", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
 	exec.Responses["ls -1 /var/lib/outpost/clusters 2>/dev/null || true"] = struct {
 		Stdout   string
 		Stderr   string
@@ -52,5 +58,6 @@ func TestListClustersFromMock(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, "demo", list[0].Name)
+	require.Equal(t, "kind", list[0].Driver)
 	require.Equal(t, "ready", list[0].Status)
 }

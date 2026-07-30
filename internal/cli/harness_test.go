@@ -9,6 +9,7 @@ import (
 	"github.com/degoke/outpost/internal/cli"
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/project"
+	"github.com/degoke/outpost/internal/testenv"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/degoke/outpost/internal/transport/mock"
 	"github.com/spf13/cobra"
@@ -44,6 +45,7 @@ func newCLIEnv(t *testing.T) *cliEnv {
 	home := t.TempDir()
 	cwd := t.TempDir()
 	t.Setenv("HOME", home)
+	testenv.UseHomeConfigDir(t, home)
 
 	writeTestGlobal(t, home)
 	setupProject(t, cwd)
@@ -106,7 +108,7 @@ func seedCLIMocks(exec *mock.Executor) {
 	exec.Responses["command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1"] = mockOK("")
 	exec.Responses["mkdir -p /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/clusters /var/lib/outpost/machines && (chown -R \"$USER:$USER\" /var/lib/outpost 2>/dev/null || sudo chown -R \"$USER:$USER\" /var/lib/outpost) && test -d /var/lib/outpost/projects"] = mockOK("")
 	exec.Responses["command -v free >/dev/null && command -v df >/dev/null && command -v du >/dev/null"] = mockOK("")
-	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1"] = mockOK("")
+	exec.Responses["command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1"] = mockOK("")
 	exec.Responses["command -v incus >/dev/null 2>&1 && (incus list >/dev/null 2>&1 || sudo incus list >/dev/null 2>&1)"] = mockOK("")
 	exec.Responses["command -v tmux >/dev/null 2>&1"] = mockOK("")
 
@@ -128,10 +130,12 @@ func seedCLIMocks(exec *mock.Executor) {
 	exec.Responses["docker compose ls --format json"] = mockOK("")
 	exec.Responses["docker stats --no-stream --format '{{json .}}'"] = mockOK("")
 	exec.Responses["docker stats --no-stream --filter label=io.x-k8s.kind.role --format '{{json .}}'"] = mockOK("")
+	exec.Responses["docker stats --no-stream --filter label=k3d.role --format '{{json .}}'"] = mockOK("")
 	exec.Responses["docker network ls --filter dangling=true -q | wc -l"] = mockOK("0\n")
 
 	// Clusters / machines metadata
 	exec.Responses["kind get clusters 2>/dev/null || true"] = mockOK("")
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = mockOK("")
 	exec.Responses["ls -1"] = mockOK("")
 	exec.Responses["incus list --format json 2>/dev/null || true"] = mockOK("[]")
 	exec.Responses["docker ps --filter label=io.x-k8s.kind.cluster="] = mockOK("0\n")

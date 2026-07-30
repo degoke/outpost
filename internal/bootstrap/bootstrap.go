@@ -161,7 +161,7 @@ fi
 
 const kubernetesToolsScript = `
 set -e
-if command -v kubectl >/dev/null 2>&1 && command -v kind >/dev/null 2>&1; then
+if command -v kubectl >/dev/null 2>&1 && command -v kind >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1; then
   exit 0
 fi
 need_sudo=""
@@ -176,10 +176,15 @@ if ! command -v kind >/dev/null 2>&1; then
   chmod +x /tmp/kind
   $need_sudo mv /tmp/kind /usr/local/bin/kind
 fi
+if ! command -v k3d >/dev/null 2>&1; then
+  curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64 -o /tmp/k3d
+  chmod +x /tmp/k3d
+  $need_sudo mv /tmp/k3d /usr/local/bin/k3d
+fi
 `
 
 func EnsureKubernetesTools(ctx context.Context, exec transport.Executor) error {
-	code, err := exec.Run(ctx, "command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1", transport.RunOpts{})
+	code, err := exec.Run(ctx, "command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1", transport.RunOpts{})
 	if err != nil {
 		return err
 	}

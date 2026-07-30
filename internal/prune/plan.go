@@ -15,6 +15,7 @@ type Candidate struct {
 	Kind           string `json:"kind"`
 	ID             string `json:"id"`
 	Name           string `json:"name,omitempty"`
+	Driver         string `json:"driver,omitempty"`
 	EstimatedBytes int64  `json:"estimated_bytes,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 }
@@ -63,18 +64,36 @@ func BuildPlan(ctx context.Context, exec transport.Executor, opts Options) (*Pru
 	}
 
 	if opts.Clusters {
-		clusters, err := inspect.RunOutput(ctx, exec, "kind get clusters 2>/dev/null || true")
+		kindClusters, err := inspect.RunOutput(ctx, exec, "kind get clusters 2>/dev/null || true")
 		if err != nil {
 			return nil, err
 		}
-		for _, line := range strings.Split(strings.TrimSpace(clusters), "\n") {
+		for _, line := range strings.Split(strings.TrimSpace(kindClusters), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
 			plan.Candidates = append(plan.Candidates, Candidate{
 				Kind: "cluster", ID: line, Name: strings.TrimPrefix(line, "outpost-"),
-				Reason: "kind cluster",
+				Driver: "kind", Reason: "kind cluster",
+			})
+		}
+		k3dClusters, err := inspect.RunOutput(ctx, exec, "k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true")
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		for _, c := range plan.Candidates {
+			seen[c.ID] = true
+		}
+		for _, line := range strings.Split(strings.TrimSpace(k3dClusters), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || seen[line] {
+				continue
+			}
+			plan.Candidates = append(plan.Candidates, Candidate{
+				Kind: "cluster", ID: line, Name: strings.TrimPrefix(line, "outpost-"),
+				Driver: "k3d", Reason: "k3d cluster",
 			})
 		}
 		return plan, nil
@@ -231,7 +250,13 @@ func executeClusters(ctx context.Context, exec transport.Executor, plan *PrunePl
 		if c.Kind != "cluster" {
 			continue
 		}
-		cmd := fmt.Sprintf("kind delete cluster --name %s", shellQuote(c.ID))
+		var cmd string
+		switch c.Driver {
+		case "k3d":
+			cmd = fmt.Sprintf("k3d cluster delete %s", shellQuote(c.ID))
+		default:
+			cmd = fmt.Sprintf("kind delete cluster --name %s", shellQuote(c.ID))
+		}
 		code, err := exec.Run(ctx, cmd, transport.RunOpts{})
 		if err != nil {
 			return result, err

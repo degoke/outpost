@@ -32,6 +32,7 @@ func DetectWithProvider(ctx context.Context, exec transport.Executor, providerMe
 		{"docker", "docker info >/dev/null 2>&1"},
 		{"compose", "docker compose version >/dev/null 2>&1"},
 		{"kind", "command -v kind >/dev/null 2>&1"},
+		{"k3d", "command -v k3d >/dev/null 2>&1"},
 		{"kubectl", "command -v kubectl >/dev/null 2>&1"},
 		{"incus", "command -v incus >/dev/null 2>&1"},
 		{"cgroup_v2", "stat -fc %T /sys/fs/cgroup/ 2>/dev/null | grep -q cgroup2fs"},

@@ -320,8 +320,9 @@ func KubeconfigsDir() (string, error) {
 	return filepath.Join(dir, "kubeconfigs"), nil
 }
 
-// ResetLocal removes the entire local Outpost configuration directory (~/.outpost).
-// Remote servers and per-repository .outpost/project.yaml files are not affected.
+// ResetLocal removes the entire local Outpost configuration directory (~/.outpost,
+// or OUTPOST_CONFIG_DIR when set). Remote servers and per-repository
+// .outpost/project.yaml files are not affected.
 func ResetLocal() error {
 	dir, err := ConfigDir()
 	if err != nil {

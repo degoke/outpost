@@ -2,7 +2,7 @@
 
 > Terminal-first remote development. Local workflow. Remote runtime.
 
-Outpost turns a remote Linux host into a shared development environment you control from your local terminal. Run Docker Compose stacks, Kubernetes (kind) clusters, and lightweight Linux machines on infrastructure you own — without installing Docker, kubectl, or a local VM stack on your laptop.
+Outpost turns a remote Linux host into a shared development environment you control from your local terminal. Run Docker Compose stacks, Kubernetes (kind or k3d) clusters, and lightweight Linux machines on infrastructure you own — without installing Docker, kubectl, or a local VM stack on your laptop.
 
 ## Primary pages
 
@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 - `outpost init` — initialize a project on the active host
 - `outpost compose up` — run Docker Compose remotely
 - `outpost connect` — forward remote services to localhost
-- `outpost cluster create` — create a kind Kubernetes cluster on the host
+- `outpost cluster create` — create a Kubernetes cluster on the host (`--driver kind` or `k3d`, default kind)
 - `outpost machine create` — launch Incus containers or VMs
 - `outpost mirror sync` — sync a repository to the host (SFTP with parallel uploads, or `--rsync`)
 - `outpost mirror watch` — continuously sync file changes while you edit locally

@@ -24,6 +24,8 @@ func RunOnce(ctx context.Context, exec transport.Executor, out io.Writer) error 
 	}
 	kindStats, _ := inspect.ListKindNodeStats(ctx, exec)
 	stats = append(stats, kindStats...)
+	k3dStats, _ := inspect.ListK3dNodeStats(ctx, exec)
+	stats = append(stats, k3dStats...)
 	incusStats, _ := inspect.ListIncusInstanceStats(ctx, exec)
 	stats = append(stats, incusStats...)
 	if len(stats) == 0 {

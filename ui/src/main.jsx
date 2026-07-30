@@ -440,15 +440,22 @@ const groups = [
   [
     "clusters",
     "Kubernetes",
-    "Create and use kind clusters on the remote host without a local kubectl runtime.",
+    "Create and use Kubernetes clusters (kind or k3d) on the remote host without a local kubectl runtime.",
     [
       [
         "Create and inspect",
         [
-          ["outpost cluster create dev", "Create a named kind cluster"],
+          [
+            "outpost cluster create dev",
+            "Create a named cluster (kind, default)",
+          ],
           [
             "outpost cluster create staging --workers 2",
-            "Create a cluster with worker nodes",
+            "Create a kind cluster with worker nodes",
+          ],
+          [
+            "outpost cluster create edge --driver k3d",
+            "Create a lighter k3s cluster via k3d",
           ],
           ["outpost cluster list", "List clusters on the host"],
           ["outpost cluster status dev", "Inspect cluster state"],
@@ -649,7 +656,10 @@ const groups = [
       [
         "Clusters and machines",
         [
-          ["outpost cluster create|list|status|delete", "Manage kind clusters"],
+          [
+            "outpost cluster create|list|status|delete",
+            "Manage Kubernetes clusters (kind or k3d)",
+          ],
           [
             "outpost machine create|list|status",
             "Create and inspect Incus machines",
@@ -1144,8 +1154,8 @@ function Capabilities() {
     ],
     [
       "◈",
-      "Kubernetes with kind",
-      "Create named clusters and run kubectl remotely. No local runtime stack required.",
+      "Kubernetes with kind or k3d",
+      "Create named clusters with kind (default) or k3d and run kubectl remotely. No local runtime stack required.",
     ],
     [
       "□",
@@ -1247,7 +1257,7 @@ function Home() {
               </div>
               <div>
                 <strong className="mono">Remote host</strong>
-                <span>Docker, kind, Incus, services</span>
+                <span>Docker, kind, k3d, Incus, services</span>
               </div>
             </div>
           </div>

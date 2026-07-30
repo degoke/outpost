@@ -165,6 +165,23 @@ func ListKindNodeStats(ctx context.Context, exec transport.Executor) ([]Containe
 	return stats, nil
 }
 
+func ListK3dNodeStats(ctx context.Context, exec transport.Executor) ([]ContainerStats, error) {
+	var out bytes.Buffer
+	cmd := "docker stats --no-stream --filter label=k3d.role --format '{{json .}}'"
+	code, err := exec.Run(ctx, cmd, transport.RunOpts{Stdout: &out})
+	if err != nil || code != 0 {
+		return nil, nil
+	}
+	stats, err := ParseDockerStatsLines(out.String())
+	if err != nil {
+		return nil, err
+	}
+	for i := range stats {
+		stats[i].Project = "k3d:" + stats[i].Name
+	}
+	return stats, nil
+}
+
 func ListComposeProjects(ctx context.Context, exec transport.Executor) ([]ComposeProject, error) {
 	var out bytes.Buffer
 	code, err := exec.Run(ctx, "docker compose ls --format json", transport.RunOpts{Stdout: &out})

@@ -163,7 +163,7 @@ var untestableCLICommands = map[string]string{
 	"compose pull":             "upload + remote image pull",
 	"compose logs":             "may stream indefinitely",
 	"compose exec":             "interactive session",
-	"cluster create":           "provisions kind cluster on remote host",
+	"cluster create":           "provisions Kubernetes cluster on remote host (kind or k3d)",
 	"cluster delete":           "destructive cluster removal",
 	"cluster status":           "requires an existing cluster name",
 	"machine create":           "provisions Incus instance",

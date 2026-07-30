@@ -1882,18 +1882,24 @@ func (app *App) clusterCmd() *cobra.Command {
 
 func (app *App) clusterCreateCmd() *cobra.Command {
 	var workers, controlPlanes int
+	var driver string
 	cmd := &cobra.Command{
 		Use:   "create NAME",
-		Short: "Create a named kind cluster",
+		Short: "Create a named Kubernetes cluster",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			drv, err := cluster.ParseDriver(driver)
+			if err != nil {
+				return err
+			}
 			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				return svc.Create(ctx, args[0], workers, controlPlanes)
+				return svc.Create(ctx, args[0], drv, workers, controlPlanes)
 			})
 		},
 	}
 	cmd.Flags().IntVar(&workers, "workers", 0, "number of worker nodes")
 	cmd.Flags().IntVar(&controlPlanes, "control-plane", 1, "number of control-plane nodes")
+	cmd.Flags().StringVar(&driver, "driver", "kind", "cluster runtime driver (kind or k3d)")
 	return cmd
 }
 
@@ -1915,8 +1921,8 @@ func (app *App) clusterListCmd() *cobra.Command {
 					return nil
 				}
 				for _, c := range clusters {
-					app.Out.Info("%s  status=%s  nodes=%d  control=%d  workers=%d",
-						c.Name, c.Status, c.NodeCount, c.ControlPlanes, c.Workers)
+					app.Out.Info("%s  driver=%s  status=%s  nodes=%d  control=%d  workers=%d",
+						c.Name, c.Driver, c.Status, c.NodeCount, c.ControlPlanes, c.Workers)
 				}
 				return nil
 			})
@@ -1938,7 +1944,7 @@ func (app *App) clusterStatusCmd() *cobra.Command {
 				if app.Out.JSON {
 					return app.Out.PrintJSON(c)
 				}
-				app.Out.Info("Cluster %s: status=%s nodes=%d", c.Name, c.Status, c.NodeCount)
+				app.Out.Info("Cluster %s: driver=%s status=%s nodes=%d", c.Name, c.Driver, c.Status, c.NodeCount)
 				return nil
 			})
 		},
@@ -1960,7 +1966,7 @@ func (app *App) clusterDeleteCmd() *cobra.Command {
 					return err
 				}
 				if !app.ForceYes {
-					if err := authz.ConfirmPrompt("This will delete the kind cluster and its node containers"); err != nil {
+					if err := authz.ConfirmPrompt("This will delete the Kubernetes cluster and its node containers"); err != nil {
 						return err
 					}
 				}
@@ -2081,7 +2087,7 @@ func (app *App) pruneCmd() *cobra.Command {
 	cmd.AddCommand(volumesCmd)
 	clustersCmd := &cobra.Command{
 		Use:   "clusters",
-		Short: "Prune kind clusters (explicit, owner only)",
+		Short: "Prune Kubernetes clusters (kind and k3d, explicit, owner only)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.runPruneClusters(dryRun, force)
 		},

@@ -88,6 +88,12 @@ func TestCollectStatusJSONShape(t *testing.T) {
 		ExitCode int
 		Err      error
 	}{Stdout: "", ExitCode: 0}
+	exec.Responses["k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print $1}' || true"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "", ExitCode: 0}
 	exec.Responses["ls -1"] = struct {
 		Stdout   string
 		Stderr   string

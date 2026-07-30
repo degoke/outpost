@@ -11,7 +11,7 @@ Use an existing Linux server or let Outpost provision one on AWS. Share the host
 ## What you get
 
 - **Remote Docker and Compose** — develop against containers on a shared host, not your laptop.
-- **Kubernetes with kind** — create named clusters and run `kubectl` remotely.
+- **Kubernetes with kind or k3d** — create named clusters and run `kubectl` remotely.
 - **Linux machines with Incus** — system containers by default; full VMs when the host supports KVM.
 - **Local port forwarding** — reach remote services at `http://127.0.0.1:8080` from your machine.
 - **Remote mirror** — sync your repo and run commands on the host; detached tmux sessions survive disconnects.
@@ -27,7 +27,7 @@ You install the Outpost CLI locally. It connects to your host over SSH, installs
 Your machine                Remote Linux host
 ─────────────               ─────────────────
 outpost CLI        SSH  →   Docker + Compose
-~/.outpost/ (global)        kind + kubectl
+~/.outpost/ (global)        kind, k3d + kubectl
 .outpost/ (per repo)        Incus
 ```
 
@@ -315,17 +315,23 @@ outpost host destroy personal          # terminate the EC2 instance
 
 ## Kubernetes
 
-Create and use kind clusters on the host. No local `kubectl` required.
+Create and use Kubernetes clusters on the host with **kind** (default) or **k3d**. No local `kubectl` required.
+
+On hosts bootstrapped before k3d support was added, Outpost installs `k3d` automatically the first time you run a cluster command (`cluster create --driver k3d`, `cluster list`, `kubectl`, etc.) — existing kind/kubectl installs are left in place.
 
 ```bash
 outpost cluster create dev
 outpost cluster create staging --workers 2
+outpost cluster create edge --driver k3d
+outpost cluster create prod --driver k3d --workers 2
 outpost cluster list
 outpost cluster status dev
 outpost kubectl --cluster dev get nodes
 outpost kubectl --cluster dev apply -f ./manifest.yaml
 outpost cluster delete dev
 ```
+
+Use `--driver kind` (default) or `--driver k3d` on `cluster create`. List, status, delete, and kubectl work the same for both drivers.
 
 Local manifest files are uploaded automatically when you apply them.
 
@@ -457,6 +463,14 @@ These flags work on every command:
 ## Development
 
 `go test` and `make ci` automatically redirect `~/.outpost` to a temporary directory so your real hosts, keys, and kubeconfigs are not touched. To opt out (e.g. integration testing against a real config), set `OUTPOST_ALLOW_REAL_CONFIG=1`. You can also point tests at a specific directory with `OUTPOST_CONFIG_DIR=/path/to/config`.
+
+## Development
+
+```bash
+make test    # or: go test ./...
+```
+
+`go test` automatically redirects `~/.outpost` to a temporary directory so your real hosts, keys, and kubeconfigs are not touched. To opt out (e.g. integration testing against a real config), set `OUTPOST_ALLOW_REAL_CONFIG=1`. You can also point tests at a specific directory with `OUTPOST_CONFIG_DIR=/path/to/config`.
 
 ## License
 

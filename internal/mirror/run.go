@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/degoke/outpost/internal/transport"
-	"github.com/degoke/outpost/internal/upload"
 )
 
 type RunOptions struct {
 	Detach      bool
 	SessionName string
 	NoSync      bool
+	ForceSync   bool
 	NoVenv      bool
 	Command     string
 }
@@ -25,13 +25,26 @@ type RunResult struct {
 }
 
 func (r *Runner) Sync(ctx context.Context) error {
-	return upload.SyncRepo(r.Cwd, r.Proj, r.Exec)
+	return r.SyncWith(ctx, SyncOptions{
+		UseRsync: r.SyncUseRsync,
+		Workers:  r.SyncWorkers,
+	})
 }
 
 func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	if !opts.NoSync {
-		if err := r.Sync(ctx); err != nil {
-			return RunResult{ExitCode: 1}, err
+		if opts.ForceSync {
+			if err := r.syncAndRecord(ctx); err != nil {
+				return RunResult{ExitCode: 1}, err
+			}
+		} else {
+			reason, err := r.syncIfNeeded(ctx, false)
+			if err != nil {
+				return RunResult{ExitCode: 1}, err
+			}
+			if reason != SyncSkippedNone {
+				r.logSyncSkip(reason)
+			}
 		}
 	}
 
@@ -71,7 +84,7 @@ func (r *Runner) runForeground(ctx context.Context, cmd string) (int, error) {
 }
 
 func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (RunResult, error) {
-	if err := EnsureTmux(ctx, r.Exec); err != nil {
+	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return RunResult{ExitCode: 1}, err
 	}
 

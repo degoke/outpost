@@ -60,8 +60,15 @@ func RewritePythonCommand(remoteVenvExists bool, venvPath, cmd string, noVenv bo
 }
 
 func (r *Runner) SetupPython(ctx context.Context, opts SetupPythonOptions) error {
-	if err := upload.SyncRepo(r.Cwd, r.Proj, r.Exec); err != nil {
+	if r.Out != nil {
+		r.Out.Step("Syncing repository...")
+	}
+	reason, err := r.syncIfNeeded(ctx, false)
+	if err != nil {
 		return err
+	}
+	if reason != SyncSkippedNone {
+		r.logSyncSkip(reason)
 	}
 	python := strings.TrimSpace(opts.Python)
 	if python == "" {
@@ -78,6 +85,9 @@ func (r *Runner) SetupPython(ctx context.Context, opts SetupPythonOptions) error
 		return err
 	}
 	if !exists {
+		if r.Out != nil {
+			r.Out.Step("Creating Python virtual environment...")
+		}
 		createCmd := fmt.Sprintf("%s -m venv %s", shellQuote(python), shellQuote(venv))
 		code, err := r.Exec.Run(ctx, createCmd, transport.RunOpts{WorkDir: r.Proj.RemoteDir})
 		if err != nil {
@@ -102,6 +112,9 @@ func (r *Runner) SetupPython(ctx context.Context, opts SetupPythonOptions) error
 	}
 	if !needInstall && exists {
 		return nil
+	}
+	if r.Out != nil {
+		r.Out.Step("Installing Python requirements from %s...", requirements)
 	}
 	installCmd := fmt.Sprintf("%s/bin/pip install -r %s",
 		shellQuote(venv),

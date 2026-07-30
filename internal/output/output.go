@@ -32,6 +32,13 @@ func New(json, debug bool) *Printer {
 	}
 }
 
+func (p *Printer) Step(msg string, args ...any) {
+	if p == nil || p.JSON {
+		return
+	}
+	fmt.Fprintf(p.Stderr, msg+"\n", args...)
+}
+
 func (p *Printer) Info(msg string, args ...any) {
 	fmt.Fprintf(p.Stdout, msg+"\n", args...)
 }

@@ -18,7 +18,7 @@ func TestShellEnsuresRemoteDir(t *testing.T) {
 		Err            error
 	}{ExitCode: 1}
 	proj := &config.Project{Name: "demo", RemoteDir: "/var/lib/outpost/projects/demo"}
-	runner := mirror.New(exec, proj, "/tmp/demo", "personal")
+	runner := mirror.New(exec, proj, "/tmp/demo", "personal", nil)
 
 	_ = runner.Shell(context.Background())
 	require.True(t, exec.HasCommand("mkdir -p /var/lib/outpost/projects/demo"))

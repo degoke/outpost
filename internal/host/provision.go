@@ -69,7 +69,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 	sshCIDR := opts.SSHCIDR
 	if sshCIDR == "" {
 		var detectErr error
-		sshCIDR, detectErr = detectPublicIPCIDR()
+		sshCIDR, detectErr = DetectPublicIPCIDR()
 		if detectErr != nil {
 			s.Out.Info("Could not detect public IP for SSH ingress (%v) — pass --ssh-cidr to restrict access", detectErr)
 		}
@@ -157,19 +157,67 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 	return nil
 }
 
+type UpdateSSHAccessOpts struct {
+	Name    string
+	SSHCIDR string
+}
+
+type UpdateSSHAccessResult struct {
+	Host            string `json:"host"`
+	SecurityGroupID string `json:"security_group_id"`
+	SSHCIDR         string `json:"ssh_cidr"`
+}
+
+func (s *Service) UpdateSSHAccess(ctx context.Context, opts UpdateSSHAccessOpts) error {
+	h, prov, err := s.awsProvisioner(ctx, opts.Name)
+	if err != nil {
+		return err
+	}
+	if h.Provider.SecurityGroup == "" {
+		return fmt.Errorf("host %q has no security group ID — cannot update SSH access", opts.Name)
+	}
+
+	sshCIDR := opts.SSHCIDR
+	if sshCIDR == "" {
+		s.Out.Step("Detecting public IP...")
+		var detectErr error
+		sshCIDR, detectErr = DetectPublicIPCIDR()
+		if detectErr != nil {
+			return fmt.Errorf("could not detect public IP: %w — pass --ssh-cidr", detectErr)
+		}
+	}
+
+	s.Out.Step("Updating SSH ingress on %s (%s)...", h.Provider.SecurityGroup, sshCIDR)
+	if err := prov.UpdateSSHAccess(ctx, h.Provider, sshCIDR); err != nil {
+		return err
+	}
+
+	result := UpdateSSHAccessResult{
+		Host:            opts.Name,
+		SecurityGroupID: h.Provider.SecurityGroup,
+		SSHCIDR:         sshCIDR,
+	}
+	if s.Out.JSON {
+		return s.Out.PrintJSON(result)
+	}
+	s.Out.Success("SSH access updated for host %q (%s)", opts.Name, sshCIDR)
+	return nil
+}
+
 func (s *Service) Start(ctx context.Context, name string) error {
 	h, prov, err := s.awsProvisioner(ctx, name)
 	if err != nil {
 		return err
 	}
+	s.Out.Step("Starting host %q...", name)
 	if err := prov.Start(ctx, h.Provider); err != nil {
 		return err
 	}
-	if state, err := prov.Describe(ctx, h.Provider); err == nil {
-		h.Hostname = firstNonEmpty(state.PublicDNS, state.PublicIP, h.Hostname)
-		h.Provider.State = state.State
+	if err := s.refreshCloudHost(ctx, h, prov); err != nil {
+		return err
 	}
-	return config.SaveGlobal(s.Global)
+	s.Out.Step("Waiting for SSH on %s...", h.Hostname)
+	return waitForSSH(ctx, h.Hostname, h.User, config.ExpandPath(h.IdentityFile))
 }
 
 func (s *Service) Stop(ctx context.Context, name string) error {
@@ -177,10 +225,25 @@ func (s *Service) Stop(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	s.Out.Step("Stopping host %q...", name)
 	if err := prov.Stop(ctx, h.Provider); err != nil {
 		return err
 	}
 	h.Provider.State = provider.StateStopped
+	if err := config.SaveGlobal(s.Global); err != nil {
+		return err
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Info("Compute billing is paused while the instance is stopped. Attached EBS volumes may still incur storage charges.")
+	}
+	return nil
+}
+
+func (s *Service) refreshCloudHost(ctx context.Context, h *config.Host, prov *awsprovider.Provisioner) error {
+	if state, err := prov.Describe(ctx, h.Provider); err == nil {
+		h.Hostname = firstNonEmpty(state.PublicDNS, state.PublicIP, h.Hostname)
+		h.Provider.State = state.State
+	}
 	return config.SaveGlobal(s.Global)
 }
 
@@ -189,14 +252,15 @@ func (s *Service) Restart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	s.Out.Step("Restarting host %q...", name)
 	if err := prov.Restart(ctx, h.Provider); err != nil {
 		return err
 	}
-	if state, err := prov.Describe(ctx, h.Provider); err == nil {
-		h.Hostname = firstNonEmpty(state.PublicDNS, state.PublicIP, h.Hostname)
-		h.Provider.State = state.State
+	if err := s.refreshCloudHost(ctx, h, prov); err != nil {
+		return err
 	}
-	return config.SaveGlobal(s.Global)
+	s.Out.Step("Waiting for SSH on %s...", h.Hostname)
+	return waitForSSH(ctx, h.Hostname, h.User, config.ExpandPath(h.IdentityFile))
 }
 
 func (s *Service) Resize(ctx context.Context, name, instanceType string) error {
@@ -204,6 +268,7 @@ func (s *Service) Resize(ctx context.Context, name, instanceType string) error {
 	if err != nil {
 		return err
 	}
+	s.Out.Step("Resizing host %q to %s...", name, instanceType)
 	if err := prov.Resize(ctx, h.Provider, provider.ResizeOpts{InstanceType: instanceType}); err != nil {
 		return err
 	}
@@ -235,6 +300,7 @@ func (s *Service) Destroy(ctx context.Context, name string, deleteVolumes, force
 	if err != nil {
 		return err
 	}
+	s.Out.Step("Destroying host %q...", name)
 	if err := prov.Destroy(ctx, h.Provider, provider.DestroyOpts{DeleteVolumes: deleteVolumes}); err != nil {
 		return err
 	}
@@ -317,9 +383,15 @@ func waitForSSH(ctx context.Context, hostname, user, identityFile string) error 
 	return fmt.Errorf("SSH not ready after %s connecting to %s@%s", provisionSSHTimeout, user, hostname)
 }
 
-func detectPublicIPCIDR() (string, error) {
+// DetectPublicIPCIDR returns the current public IP as a /32 CIDR block.
+func DetectPublicIPCIDR() (string, error) {
+	return DetectPublicIPCIDRFromURL("https://checkip.amazonaws.com")
+}
+
+// DetectPublicIPCIDRFromURL fetches the caller's public IP from url and returns it as a /32 CIDR.
+func DetectPublicIPCIDRFromURL(url string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("https://checkip.amazonaws.com")
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", err
 	}

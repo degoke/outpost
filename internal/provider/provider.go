@@ -64,6 +64,7 @@ type HostProvisioner interface {
 	Restart(ctx context.Context, meta *config.ProviderMeta) error
 	Resize(ctx context.Context, meta *config.ProviderMeta, opts ResizeOpts) error
 	Destroy(ctx context.Context, meta *config.ProviderMeta, opts DestroyOpts) error
+	UpdateSSHAccess(ctx context.Context, meta *config.ProviderMeta, cidr string) error
 }
 
 type LoginResult struct {

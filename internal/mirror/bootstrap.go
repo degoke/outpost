@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/degoke/outpost/internal/output"
 	"github.com/degoke/outpost/internal/transport"
 )
 
@@ -25,13 +26,16 @@ else
 fi
 `
 
-func EnsureTmux(ctx context.Context, exec transport.Executor) error {
+func EnsureTmux(ctx context.Context, exec transport.Executor, out *output.Printer) error {
 	code, err := exec.Run(ctx, "command -v tmux >/dev/null 2>&1", transport.RunOpts{})
 	if err != nil {
 		return err
 	}
 	if code == 0 {
 		return nil
+	}
+	if out != nil {
+		out.Step("Installing tmux...")
 	}
 	var stderr strings.Builder
 	code, err = exec.Run(ctx, tmuxInstallScript, transport.RunOpts{Stderr: &stderr})

@@ -168,8 +168,14 @@ const groups = [
       [
         "Manage AWS lifecycle",
         [
-          ["outpost host start dev", "Start a stopped EC2 instance"],
-          ["outpost host stop dev", "Stop the instance to save cost"],
+          [
+            "outpost host stop dev",
+            "Stop EC2 instance to pause compute billing",
+          ],
+          [
+            "outpost host start dev",
+            "Start a stopped instance and wait for SSH",
+          ],
           ["outpost host restart dev", "Restart the instance"],
           [
             "outpost host resize dev --instance-type t3.large",
@@ -194,16 +200,44 @@ const groups = [
     "Keep your repository local while Compose runs on the remote host.",
     [
       [
+        "The .outpost folder",
+        [
+          [
+            "my-repo/.outpost/project.yaml",
+            "Project name, host override, and compose file list",
+          ],
+          [
+            "my-repo/.outpost/.outpostignore",
+            "Mirror sync ignore rules (created by outpost init)",
+          ],
+          [
+            "~/.outpost/config.yaml",
+            "Global CLI config — hosts, keys, sessions (not in your repo)",
+          ],
+        ],
+        "outpost init creates .outpost/ in your repository. It is local project metadata and is never uploaded to the remote host. Commit it so teammates share the same project name and remote path, or use --write-gitignore to keep it local. This is separate from ~/.outpost/ on your machine, which stores global host registration and SSH state.",
+      ],
+      [
         "Initialize",
         [
           ["outpost init", "Detect Compose files and write project config"],
           [
             "outpost init --name my-api --write-gitignore",
-            "Initialize with a project name and gitignore",
+            "Keep .outpost/ local instead of committing project config",
           ],
           ["outpost init --no-compose", "Initialize a script-only repository"],
         ],
-        "Detect Compose files and write .outpost/project.yaml, or initialize a script-only repository.",
+        "Creates .outpost/project.yaml and .outpost/.outpostignore. See “The .outpost folder” above for what belongs in that directory.",
+      ],
+      [
+        "Ignore files from sync",
+        [
+          [
+            "# .outpost/.outpostignore\nnode_modules/\n.venv/\ndist/",
+            "Exclude paths from mirror sync (created by outpost init)",
+          ],
+        ],
+        "Works in all repositories. In git repos, patterns apply in addition to .gitignore. A legacy repo-root .outpostignore is still supported.",
       ],
       [
         "Manage services",
@@ -245,11 +279,45 @@ const groups = [
         [
           ["outpost mirror sync", "Mirror the repository to the host"],
           [
+            "outpost mirror sync --rsync",
+            "Use rsync for faster incremental sync (requires rsync locally and on the host)",
+          ],
+          [
+            "outpost mirror sync --workers 8",
+            "Upload files in parallel over SFTP (default: 6 workers)",
+          ],
+          [
             "outpost mirror run node scripts/generate.js",
             "Run a command in the remote project directory",
           ],
+          [
+            "outpost mirror run --sync -- npm test",
+            "Force a sync even when local files are unchanged",
+          ],
+          [
+            "outpost mirror run --no-sync -- python script.py",
+            "Run without syncing",
+          ],
         ],
-        "Mirror the repository and run a command in its remote directory.",
+        "Mirror the repository and run commands in its remote directory. Sync is skipped automatically when nothing changed locally or mirror watch is already running.",
+      ],
+      [
+        "Watch for changes",
+        [
+          [
+            "outpost mirror watch",
+            "Continuously sync file changes to the host (SFTP mode)",
+          ],
+          [
+            "outpost mirror watch --rsync",
+            "Re-sync with rsync on each debounced change",
+          ],
+          [
+            "outpost mirror watch --debounce 500ms",
+            "Wait longer before syncing bursts of edits",
+          ],
+        ],
+        "Keep the remote copy up to date while you edit locally. mirror run detects an active watch and skips its own sync. Press Ctrl+C to stop.",
       ],
       [
         "Keep a session alive",
@@ -273,12 +341,16 @@ const groups = [
             "Create a remote virtual environment",
           ],
           [
+            "outpost mirror setup-python --rsync",
+            "Sync the repo with rsync before creating the venv",
+          ],
+          [
             "outpost mirror run python scripts/train.py",
             "Run Python in the remote environment",
           ],
           ["outpost mirror shell", "Open a shell in the mirrored project"],
         ],
-        "Create a remote-only virtual environment and work inside it.",
+        "Create a remote-only virtual environment and work inside it. The local .venv is never synced.",
       ],
     ],
   ],
@@ -520,9 +592,17 @@ const groups = [
         "Projects, mirrors, and sessions",
         [
           ["outpost init [flags]", "Create .outpost/project.yaml"],
-          ["outpost mirror sync|shell", "Sync or open the remote project"],
           [
-            "outpost mirror setup-python [flags]",
+            "outpost mirror sync [--rsync] [--workers N]",
+            "Sync the repository to the host",
+          ],
+          [
+            "outpost mirror watch [--rsync] [--workers N] [--debounce DURATION]",
+            "Continuously sync local changes to the host",
+          ],
+          ["outpost mirror shell", "Open a shell in the remote project"],
+          [
+            "outpost mirror setup-python [--rsync] [--workers N]",
             "Create a remote Python environment",
           ],
           [
@@ -534,7 +614,7 @@ const groups = [
             "Manage detached sessions",
           ],
         ],
-        "Use --no-sync and --no-venv with mirror run when you need to control synchronization and virtual-environment activation.",
+        "Use --sync to force a sync before mirror run. Use --no-sync to skip entirely. Rsync mode requires SSH key auth and rsync on both sides.",
       ],
       [
         "Clusters and machines",
@@ -1050,7 +1130,7 @@ function Capabilities() {
     [
       "⟳",
       "Remote mirror",
-      "Sync your repo, run commands remotely, and keep detached sessions alive.",
+      "Sync your repo, watch for changes, run commands remotely, and keep detached sessions alive.",
     ],
     [
       "♧",

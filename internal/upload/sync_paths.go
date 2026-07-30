@@ -17,6 +17,16 @@ var alwaysIgnore = []string{
 	".DS_Store",
 }
 
+// AlwaysIgnorePatterns returns built-in ignore patterns used during sync.
+func AlwaysIgnorePatterns() []string {
+	return append([]string{}, alwaysIgnore...)
+}
+
+// ShouldIgnoreRel reports whether a repository-relative path should be skipped.
+func ShouldIgnoreRel(rel string, patterns []string, isDir bool) bool {
+	return shouldIgnore(rel, patterns, isDir)
+}
+
 func collectSyncPaths(cwd string, proj *config.Project) ([]string, error) {
 	seen := map[string]bool{}
 	var paths []string

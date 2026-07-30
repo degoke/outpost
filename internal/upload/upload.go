@@ -3,42 +3,15 @@ package upload
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/transport"
 )
-
-func SyncProject(cwd string, proj *config.Project, exec transport.Executor) error {
-	if err := transport.EnsureRemoteDir(exec, proj.RemoteDir); err != nil {
-		return err
-	}
-	files, err := collectSyncPaths(cwd, proj)
-	if err != nil {
-		return err
-	}
-	for _, rel := range files {
-		local := filepath.Join(cwd, rel)
-		remote := remotePath(proj, rel)
-		if err := syncFile(exec, local, remote); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func syncFile(exec transport.Executor, local, remote string) error {
-	needUpload, err := needsUpload(exec, local, remote)
-	if err != nil {
-		return err
-	}
-	if !needUpload {
-		return nil
-	}
-	return exec.Upload(local, remote)
-}
 
 func needsUpload(exec transport.Executor, local, remote string) (bool, error) {
 	return NeedsUpload(exec, local, remote)
@@ -46,7 +19,47 @@ func needsUpload(exec transport.Executor, local, remote string) (bool, error) {
 
 // NeedsUpload reports whether local and remote file content differ.
 func NeedsUpload(exec transport.Executor, local, remote string) (bool, error) {
-	localHash, err := fileHash(local)
+	if ssh, ok := exec.(*transport.SSHExecutor); ok {
+		session, err := ssh.OpenSFTP()
+		if err == nil {
+			defer session.Close()
+			return needsUploadSession(session, local, remote)
+		}
+	}
+	return needsUploadLegacy(exec, local, remote)
+}
+
+func needsUploadSession(session *transport.SFTPSession, local, remote string) (bool, error) {
+	localInfo, err := os.Stat(local)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return true, err
+	}
+	remoteInfo, err := session.Stat(remote)
+	if err != nil {
+		return true, nil
+	}
+	if localInfo.Size() != remoteInfo.Size() {
+		return true, nil
+	}
+	if transport.ModTimesMatch(localInfo, remoteInfo) {
+		return false, nil
+	}
+	localHash, err := hashLocalFile(local)
+	if err != nil {
+		return true, err
+	}
+	remoteHash, err := session.HashRemote(remote)
+	if err != nil {
+		return true, nil
+	}
+	return localHash != remoteHash, nil
+}
+
+func needsUploadLegacy(exec transport.Executor, local, remote string) (bool, error) {
+	localHash, err := hashLocalFile(local)
 	if err != nil {
 		return true, err
 	}
@@ -61,13 +74,27 @@ func NeedsUpload(exec transport.Executor, local, remote string) (bool, error) {
 	return true, nil
 }
 
-func fileHash(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func hashLocalFile(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// ModTimesEqual is exported for tests.
+func ModTimesEqual(local, remote os.FileInfo) bool {
+	return transport.ModTimesMatch(local, remote)
+}
+
+// TruncateToSecond truncates a time to second precision in UTC.
+func TruncateToSecond(t time.Time) time.Time {
+	return t.UTC().Truncate(time.Second)
 }
 
 func RemoteComposeArgs(proj *config.Project) string {

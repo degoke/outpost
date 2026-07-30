@@ -98,6 +98,10 @@ func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Proje
 		return nil, err
 	}
 
+	if err := ensureOutpostIgnore(cwd); err != nil {
+		return nil, err
+	}
+
 	if writeGitignore {
 		if err := appendGitignore(cwd); err != nil {
 			return nil, err
@@ -126,6 +130,24 @@ func detectExtraFiles(cwd string, existing []string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+const defaultOutpostIgnore = `# Outpost mirror sync ignore rules (same syntax as .gitignore).
+
+node_modules/
+.venv/
+dist/
+*.log
+`
+
+func ensureOutpostIgnore(cwd string) error {
+	path := config.OutpostIgnorePath(cwd)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(defaultOutpostIgnore), 0644)
 }
 
 func appendGitignore(cwd string) error {

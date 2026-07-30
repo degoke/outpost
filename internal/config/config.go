@@ -113,6 +113,16 @@ func ProjectConfigPath(cwd string) string {
 	return filepath.Join(cwd, ".outpost", "project.yaml")
 }
 
+// OutpostIgnorePath returns the path to the project ignore file inside .outpost/.
+func OutpostIgnorePath(cwd string) string {
+	return filepath.Join(cwd, ".outpost", ".outpostignore")
+}
+
+// LegacyOutpostIgnorePath returns the deprecated repo-root ignore file path.
+func LegacyOutpostIgnorePath(cwd string) string {
+	return filepath.Join(cwd, ".outpostignore")
+}
+
 func SessionsDir() (string, error) {
 	dir, err := ConfigDir()
 	if err != nil {

@@ -76,6 +76,9 @@ func (s *Service) Create(ctx context.Context, name string, workers, controlPlane
 		return err
 	}
 
+	if s.Out != nil {
+		s.Out.Step("Creating Kubernetes cluster %q with kind...", name)
+	}
 	createCmd := fmt.Sprintf("kind create cluster --name %s --config %s", shellQuote(kindName), shellQuote(cfgPath))
 	code, err := s.Exec.Run(ctx, createCmd, transport.RunOpts{})
 	if err != nil {
@@ -87,6 +90,9 @@ func (s *Service) Create(ctx context.Context, name string, workers, controlPlane
 		return fmt.Errorf("kind create cluster failed (exit %d)", code)
 	}
 
+	if s.Out != nil {
+		s.Out.Step("Saving kubeconfig...")
+	}
 	kubeCmd := fmt.Sprintf("kind get kubeconfig --name %s", shellQuote(kindName))
 	kubeOut, err := inspect.RunOutput(ctx, s.Exec, kubeCmd)
 	if err != nil {

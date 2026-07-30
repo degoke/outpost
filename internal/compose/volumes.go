@@ -143,7 +143,7 @@ func prepareVolumeOps(ctx context.Context, exec transport.Executor, cwd string, 
 	if err := proj.RequireCompose(); err != nil {
 		return nil, err
 	}
-	if err := upload.SyncProject(cwd, proj, exec); err != nil {
+	if err := upload.SyncProject(cwd, proj, exec, nil); err != nil {
 		return nil, err
 	}
 	return ResolveVolumes(ctx, exec, cwd, proj)

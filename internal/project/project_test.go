@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/project"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +48,15 @@ python:
 	require.NotNil(t, p.Python)
 	require.Equal(t, ".venv", p.Python.Venv)
 	require.Equal(t, "requirements.txt", p.Python.Requirements)
+}
+
+func TestInitCreatesOutpostIgnore(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services: {}"), 0644))
+	_, err := project.Init(dir, "", "", false, false)
+	require.NoError(t, err)
+	_, err = os.Stat(config.OutpostIgnorePath(dir))
+	require.NoError(t, err)
 }
 
 func TestDeriveNameExplicit(t *testing.T) {

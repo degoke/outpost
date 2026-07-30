@@ -81,7 +81,19 @@ func (s *EC2) DescribeSecurityGroups(ctx context.Context, params *ec2.DescribeSe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []ec2types.SecurityGroup
-	for _, sg := range s.SecurityGroups {
+	for id, sg := range s.SecurityGroups {
+		if params.GroupIds != nil {
+			match := false
+			for _, gid := range params.GroupIds {
+				if id == gid {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
 		if params.Filters != nil {
 			match := true
 			for _, f := range params.Filters {
@@ -106,7 +118,68 @@ func (s *EC2) DescribeSecurityGroups(ctx context.Context, params *ec2.DescribeSe
 }
 
 func (s *EC2) AuthorizeSecurityGroupIngress(ctx context.Context, params *ec2.AuthorizeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupIngressOutput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sgID := aws.ToString(params.GroupId)
+	sg, ok := s.SecurityGroups[sgID]
+	if !ok {
+		return nil, fmt.Errorf("InvalidGroup.NotFound: %s", sgID)
+	}
+	for _, perm := range params.IpPermissions {
+		for _, r := range perm.IpRanges {
+			cidr := aws.ToString(r.CidrIp)
+			for _, existing := range sg.IpPermissions {
+				if aws.ToString(existing.IpProtocol) == aws.ToString(perm.IpProtocol) &&
+					aws.ToInt32(existing.FromPort) == aws.ToInt32(perm.FromPort) &&
+					aws.ToInt32(existing.ToPort) == aws.ToInt32(perm.ToPort) {
+					for _, er := range existing.IpRanges {
+						if aws.ToString(er.CidrIp) == cidr {
+							return nil, fmt.Errorf("InvalidPermission.Duplicate: rule already exists")
+						}
+					}
+				}
+			}
+		}
+		sg.IpPermissions = append(sg.IpPermissions, perm)
+	}
 	return &ec2.AuthorizeSecurityGroupIngressOutput{}, nil
+}
+
+func (s *EC2) RevokeSecurityGroupIngress(ctx context.Context, params *ec2.RevokeSecurityGroupIngressInput, optFns ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sgID := aws.ToString(params.GroupId)
+	sg, ok := s.SecurityGroups[sgID]
+	if !ok {
+		return nil, fmt.Errorf("InvalidGroup.NotFound: %s", sgID)
+	}
+	for _, revoke := range params.IpPermissions {
+		var kept []ec2types.IpPermission
+		for _, existing := range sg.IpPermissions {
+			if aws.ToString(existing.IpProtocol) != aws.ToString(revoke.IpProtocol) ||
+				aws.ToInt32(existing.FromPort) != aws.ToInt32(revoke.FromPort) ||
+				aws.ToInt32(existing.ToPort) != aws.ToInt32(revoke.ToPort) {
+				kept = append(kept, existing)
+				continue
+			}
+			revokeCIDRs := map[string]bool{}
+			for _, r := range revoke.IpRanges {
+				revokeCIDRs[aws.ToString(r.CidrIp)] = true
+			}
+			var remainingRanges []ec2types.IpRange
+			for _, r := range existing.IpRanges {
+				if !revokeCIDRs[aws.ToString(r.CidrIp)] {
+					remainingRanges = append(remainingRanges, r)
+				}
+			}
+			if len(remainingRanges) > 0 {
+				existing.IpRanges = remainingRanges
+				kept = append(kept, existing)
+			}
+		}
+		sg.IpPermissions = kept
+	}
+	return &ec2.RevokeSecurityGroupIngressOutput{}, nil
 }
 
 func (s *EC2) AuthorizeSecurityGroupEgress(ctx context.Context, params *ec2.AuthorizeSecurityGroupEgressInput, optFns ...func(*ec2.Options)) (*ec2.AuthorizeSecurityGroupEgressOutput, error) {

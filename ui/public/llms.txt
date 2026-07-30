@@ -25,8 +25,17 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 - `outpost connect` — forward remote services to localhost
 - `outpost cluster create` — create a kind Kubernetes cluster on the host
 - `outpost machine create` — launch Incus containers or VMs
-- `outpost mirror sync` — sync a repository and run commands remotely
+- `outpost mirror sync` — sync a repository to the host (SFTP with parallel uploads, or `--rsync`)
+- `outpost mirror watch` — continuously sync file changes while you edit locally
+- `outpost mirror run` — run commands in the mirrored project directory
 - `outpost invite create` — share host access with teammates
+
+## Configuration
+
+Outpost uses two `.outpost` locations:
+
+- `~/.outpost/` — global CLI config on your machine (hosts, SSH keys, sessions). Not in your git repo.
+- `.outpost/` — per-repository project folder created by `outpost init` (`project.yaml`, `.outpostignore`). Never synced to the remote host. Usually committed so teammates share the same project name.
 
 ## Product facts
 

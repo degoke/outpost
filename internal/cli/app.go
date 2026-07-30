@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,18 +35,32 @@ import (
 )
 
 type App struct {
-	Global   *config.Global
-	Out      *output.Printer
-	HostFlag string
-	Cwd      string
-	ForceYes bool
+	Global          *config.Global
+	Out             *output.Printer
+	HostFlag        string
+	Cwd             string
+	ForceYes        bool
+	executorFactory ExecutorFactory
 }
 
+// ExecutorFactory creates a transport executor for CLI commands. Tests inject a mock factory.
+type ExecutorFactory func(g *config.Global, hostName string, autoTrustHostKey bool) (transport.Executor, *config.Host, error)
+
 func New() *cobra.Command {
+	root, _ := NewWithApp()
+	return root
+}
+
+// NewWithApp builds the CLI root command and returns the app for test configuration.
+func NewWithApp() (*cobra.Command, *App) {
 	app := &App{
 		Out: output.New(false, false),
 		Cwd: mustCwd(),
 	}
+	return app.buildRoot(), app
+}
+
+func (app *App) buildRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "outpost",
 		Short: "Turn a remote Linux host into a shared development runtime",
@@ -103,6 +118,19 @@ func New() *cobra.Command {
 	return root
 }
 
+func (app *App) newExecutor(hostName string) (transport.Executor, *config.Host, error) {
+	factory := app.executorFactory
+	if factory == nil {
+		factory = host.NewExecutor
+	}
+	return factory(app.Global, hostName, app.ForceYes)
+}
+
+// SetExecutorFactory overrides how CLI commands obtain a remote executor (used in tests).
+func (app *App) SetExecutorFactory(factory ExecutorFactory) {
+	app.executorFactory = factory
+}
+
 func commandPath(cmd *cobra.Command) string {
 	var parts []string
 	for c := cmd; c != nil; c = c.Parent() {
@@ -134,7 +162,7 @@ func (app *App) resolveHostName(proj *config.Project) string {
 }
 
 func (app *App) withExecutor(run func(context.Context, transport.Executor, *config.Host) error) error {
-	exec, h, err := host.NewExecutor(app.Global, app.HostFlag, app.ForceYes)
+	exec, h, err := app.newExecutor(app.HostFlag)
 	if err != nil {
 		return err
 	}
@@ -142,7 +170,7 @@ func (app *App) withExecutor(run func(context.Context, transport.Executor, *conf
 		defer c.Close()
 	}
 	ctx := context.Background()
-	if err := bootstrap.Ensure(ctx, exec); err != nil {
+	if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
 		return err
 	}
 	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
@@ -157,7 +185,7 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 		return err
 	}
 	hostName := app.resolveHostName(proj)
-	exec, h, err := host.NewExecutor(app.Global, hostName, app.ForceYes)
+	exec, h, err := app.newExecutor(hostName)
 	if err != nil {
 		return err
 	}
@@ -165,7 +193,7 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 		defer c.Close()
 	}
 	ctx := context.Background()
-	if err := bootstrap.Ensure(ctx, exec); err != nil {
+	if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
 		return err
 	}
 	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
@@ -187,6 +215,7 @@ func (app *App) hostCmd() *cobra.Command {
 	cmd.AddCommand(app.hostResizeCmd())
 	cmd.AddCommand(app.hostRemoveCmd())
 	cmd.AddCommand(app.hostDestroyCmd())
+	cmd.AddCommand(app.hostUpdateSSHAccessCmd())
 	cmd.AddCommand(app.hostCapabilitiesCmd())
 	return cmd
 }
@@ -228,7 +257,7 @@ func (app *App) hostCreateCmd() *cobra.Command {
 func (app *App) hostStartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "start NAME",
-		Short: "Start a stopped cloud host",
+		Short: "Start a stopped cloud host and wait for SSH",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := (&host.Service{Global: app.Global, Out: app.Out}).Start(context.Background(), args[0]); err != nil {
@@ -243,7 +272,7 @@ func (app *App) hostStartCmd() *cobra.Command {
 func (app *App) hostStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop NAME",
-		Short: "Stop a cloud host",
+		Short: "Stop a cloud host (pauses compute billing on AWS)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := (&host.Service{Global: app.Global, Out: app.Out}).Stop(context.Background(), args[0]); err != nil {
@@ -268,6 +297,23 @@ func (app *App) hostRestartCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (app *App) hostUpdateSSHAccessCmd() *cobra.Command {
+	var sshCIDR string
+	cmd := &cobra.Command{
+		Use:   "update-ssh-access NAME",
+		Short: "Update SSH ingress on the host security group to your current IP",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (&host.Service{Global: app.Global, Out: app.Out}).UpdateSSHAccess(context.Background(), host.UpdateSSHAccessOpts{
+				Name:    args[0],
+				SSHCIDR: sshCIDR,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&sshCIDR, "ssh-cidr", "", "CIDR allowed for SSH ingress (default: auto-detect current public IP)")
+	return cmd
 }
 
 func (app *App) hostResizeCmd() *cobra.Command {
@@ -447,8 +493,10 @@ func (app *App) initCmd() *cobra.Command {
 			}
 			app.Out.Success("Initialized project %q", p.Name)
 			app.Out.Info("Remote directory: %s", p.RemoteDir)
+			app.Out.Info("Created %s — commit this file so teammates share the same project name and remote path", config.ProjectConfigPath(app.Cwd))
+			app.Out.Info("Edit %s to exclude paths from mirror sync", config.OutpostIgnorePath(app.Cwd))
 			if !writeGitignore {
-				app.Out.Info("Tip: add .outpost/ to .gitignore or re-run with --write-gitignore")
+				app.Out.Info("Tip: run with --write-gitignore to keep .outpost/ out of git (local-only config)")
 			}
 			return nil
 		},
@@ -620,6 +668,7 @@ func (app *App) composeSubCmd(sub string, uploadFirst, checkDestructive bool) *c
 					Cwd:      app.Cwd,
 					HostName: h.Name,
 					ForceYes: app.ForceYes,
+					Out:      app.Out,
 				}
 				code, err := runner.Run(ctx, sub, args, uploadFirst)
 				if err != nil {
@@ -795,6 +844,7 @@ func (app *App) mirrorCmd() *cobra.Command {
 		Short: "Sync and run commands remotely in the project directory",
 	}
 	cmd.AddCommand(app.mirrorSyncCmd())
+	cmd.AddCommand(app.mirrorWatchCmd())
 	cmd.AddCommand(app.mirrorSetupPythonCmd())
 	cmd.AddCommand(app.mirrorRunCmd())
 	cmd.AddCommand(app.mirrorShellCmd())
@@ -803,13 +853,17 @@ func (app *App) mirrorCmd() *cobra.Command {
 }
 
 func (app *App) mirrorSyncCmd() *cobra.Command {
-	return &cobra.Command{
+	var useRsync bool
+	var workers int
+	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync the repository to the remote project directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
-				if err := runner.Sync(ctx); err != nil {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
+				runner.SyncUseRsync = useRsync
+				runner.SyncWorkers = workers
+				if err := runner.SyncExplicit(ctx); err != nil {
 					return err
 				}
 				app.Out.Success("Repository synced to %s", proj.RemoteDir)
@@ -817,16 +871,51 @@ func (app *App) mirrorSyncCmd() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for faster incremental sync (requires rsync locally and on the remote)")
+	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
+	return cmd
+}
+
+func (app *App) mirrorWatchCmd() *cobra.Command {
+	var useRsync bool
+	var workers int
+	var debounce time.Duration
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Continuously sync repository changes to the remote",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
+				watchCtx, cancel := mirror.WatchContext(ctx)
+				defer cancel()
+				return runner.Watch(watchCtx, mirror.WatchOptions{
+					SyncOptions: mirror.SyncOptions{
+						UseRsync: useRsync,
+						Workers:  workers,
+					},
+					Debounce: debounce,
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for each sync (requires rsync locally and on the remote)")
+	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
+	cmd.Flags().DurationVar(&debounce, "debounce", 300*time.Millisecond, "Debounce interval before syncing changes")
+	return cmd
 }
 
 func (app *App) mirrorSetupPythonCmd() *cobra.Command {
 	var pythonBin, requirements string
+	var useRsync bool
+	var workers int
 	cmd := &cobra.Command{
 		Use:   "setup-python",
 		Short: "Create a remote Python virtual environment and install requirements",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
+				runner.SyncUseRsync = useRsync
+				runner.SyncWorkers = workers
 				if err := runner.SetupPython(ctx, mirror.SetupPythonOptions{
 					Python:       pythonBin,
 					Requirements: requirements,
@@ -840,6 +929,8 @@ func (app *App) mirrorSetupPythonCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&pythonBin, "python", "python3", "Python interpreter for creating the venv")
 	cmd.Flags().StringVar(&requirements, "requirements", "", "requirements file (default from project.yaml or requirements.txt)")
+	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for repository sync (requires rsync locally and on the remote)")
+	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
 	return cmd
 }
 
@@ -847,7 +938,10 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 	var detach bool
 	var sessionName string
 	var noSync bool
+	var forceSync bool
 	var noVenv bool
+	var useRsync bool
+	var workers int
 	cmd := &cobra.Command{
 		Use:                "run [flags] -- COMMAND [ARGS...]",
 		Short:              "Run a command in the remote project directory",
@@ -877,8 +971,23 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 					continue
 				case "--no-sync":
 					noSync = true
+				case "--sync":
+					forceSync = true
 				case "--no-venv":
 					noVenv = true
+				case "--rsync":
+					useRsync = true
+				case "--workers":
+					if len(rest) < 2 {
+						return fmt.Errorf("--workers requires a value")
+					}
+					n, err := strconv.Atoi(rest[1])
+					if err != nil || n < 1 {
+						return fmt.Errorf("--workers requires a positive integer")
+					}
+					workers = n
+					rest = rest[2:]
+					continue
 				default:
 					return fmt.Errorf("unknown flag %q", rest[0])
 				}
@@ -889,11 +998,16 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 			}
 			command := strings.Join(commandArgs, " ")
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
+				runner.SyncUseRsync = useRsync
+				if workers > 0 {
+					runner.SyncWorkers = workers
+				}
 				result, err := runner.Run(ctx, mirror.RunOptions{
 					Detach:      detach,
 					SessionName: sessionName,
 					NoSync:      noSync,
+					ForceSync:   forceSync,
 					NoVenv:      noVenv,
 					Command:     command,
 				})
@@ -920,7 +1034,7 @@ func (app *App) mirrorShellCmd() *cobra.Command {
 		Short: "Open an interactive shell in the remote project directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				return runner.Shell(ctx)
 			})
 		},
@@ -934,7 +1048,7 @@ func (app *App) mirrorSessionsCmd() *cobra.Command {
 		Short: "List mirror sessions for this project",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				sessions, err := runner.ListSessions(ctx)
 				if err != nil {
 					return err
@@ -963,7 +1077,7 @@ func (app *App) mirrorSessionsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				status, err := runner.SessionStatus(ctx, args[0])
 				if err != nil {
 					return err
@@ -994,7 +1108,7 @@ func (app *App) mirrorSessionsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				return runner.AttachSession(ctx, args[0])
 			})
 		},
@@ -1005,7 +1119,7 @@ func (app *App) mirrorSessionsCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name)
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				if err := runner.KillSession(ctx, args[0]); err != nil {
 					return err
 				}
@@ -1089,7 +1203,7 @@ func (app *App) inviteJoin(code, label, joinHost, hostname, user string, port in
 
 	if joinHost != "" {
 		var err error
-		exec, h, err = host.NewExecutor(app.Global, joinHost, app.ForceYes)
+		exec, h, err = app.newExecutor(joinHost)
 		if err != nil {
 			return err
 		}
@@ -1315,7 +1429,7 @@ func (app *App) capacityCmd() *cobra.Command {
 
 func (app *App) withClusterExecutor(run func(context.Context, transport.Executor, *config.Host, *cluster.Service) error) error {
 	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
-		if err := bootstrap.EnsureKubernetesTools(ctx, exec); err != nil {
+		if err := bootstrap.EnsureKubernetesToolsWithOut(ctx, exec, app.Out); err != nil {
 			return err
 		}
 		svc := &cluster.Service{Exec: exec, Out: app.Out, HostName: h.Name}
@@ -1325,7 +1439,7 @@ func (app *App) withClusterExecutor(run func(context.Context, transport.Executor
 
 func (app *App) withMachineExecutor(run func(context.Context, transport.Executor, *config.Host, *machine.Service) error) error {
 	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
-		if err := bootstrap.EnsureIncus(ctx, exec); err != nil {
+		if err := bootstrap.EnsureIncusWithOut(ctx, exec, app.Out); err != nil {
 			return err
 		}
 		svc := &machine.Service{Exec: exec, Out: app.Out, HostName: h.Name}

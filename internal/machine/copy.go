@@ -11,6 +11,7 @@ import (
 
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/transport"
+	"github.com/degoke/outpost/internal/upload"
 )
 
 type copyEndpoint struct {
@@ -104,7 +105,7 @@ func (s *Service) copyToMachine(ctx context.Context, localPath, machineName, rem
 		return err
 	}
 	stagingPath := stagingDir + "/" + filepath.Base(localPath)
-	if err := uploadToHost(s.Exec, localPath, stagingPath, s.copyProgressWriter()); err != nil {
+	if err := upload.UploadFile(s.Exec, localPath, stagingPath, s.copyProgressWriter()); err != nil {
 		return fmt.Errorf("upload to host: %w", err)
 	}
 	defer func() { _, _ = s.Exec.Run(ctx, "rm -rf "+shellQuote(stagingPath), quietRunOpts()) }()
@@ -209,17 +210,6 @@ func (s *Service) copyRunOpts() transport.RunOpts {
 		return transport.RunOpts{Stdout: io.Discard, Stderr: s.Out.Stderr}
 	}
 	return quietRunOpts()
-}
-
-func uploadToHost(exec transport.Executor, localPath, remotePath string, progress io.Writer) error {
-	if progress != nil {
-		if uploader, ok := exec.(interface {
-			UploadWithProgress(local, remote string, out io.Writer) error
-		}); ok {
-			return uploader.UploadWithProgress(localPath, remotePath, progress)
-		}
-	}
-	return exec.Upload(localPath, remotePath)
 }
 
 func downloadToLocal(exec transport.Executor, remotePath, localPath string, progress io.Writer) error {

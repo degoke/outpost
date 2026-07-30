@@ -84,7 +84,7 @@ func LoadSessionMeta(host, project, name string) (*SessionMeta, error) {
 }
 
 func (r *Runner) ListSessions(ctx context.Context) ([]SessionStatus, error) {
-	if err := EnsureTmux(ctx, r.Exec); err != nil {
+	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return nil, err
 	}
 	prefix := sessionPrefix(r.Proj)
@@ -172,7 +172,7 @@ func parseExitLine(log string) *int {
 }
 
 func (r *Runner) AttachSession(ctx context.Context, shortName string) error {
-	if err := EnsureTmux(ctx, r.Exec); err != nil {
+	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return err
 	}
 	shortName, err := SanitizeSessionName(shortName)
@@ -202,7 +202,7 @@ func (r *Runner) AttachSession(ctx context.Context, shortName string) error {
 }
 
 func (r *Runner) KillSession(ctx context.Context, shortName string) error {
-	if err := EnsureTmux(ctx, r.Exec); err != nil {
+	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return err
 	}
 	shortName, err := SanitizeSessionName(shortName)
@@ -210,6 +210,9 @@ func (r *Runner) KillSession(ctx context.Context, shortName string) error {
 		return err
 	}
 	tmuxName := TmuxSessionName(r.Proj, shortName)
+	if r.Out != nil {
+		r.Out.Step("Stopping session %q...", shortName)
+	}
 	cmd := fmt.Sprintf("tmux kill-session -t %s", shellQuote(tmuxName))
 	code, err := r.Exec.Run(ctx, cmd, transport.RunOpts{})
 	if err != nil {

@@ -27,8 +27,8 @@ You install the Outpost CLI locally. It connects to your host over SSH, installs
 Your machine                Remote Linux host
 ─────────────               ─────────────────
 outpost CLI        SSH  →   Docker + Compose
-~/.outpost/                 kind + kubectl
-.outpost/project.yaml       Incus
+~/.outpost/ (global)        kind + kubectl
+.outpost/ (per repo)        Incus
 ```
 
 When you run `outpost compose up`, Outpost uploads your compose files (and `.env` if present) to the host and starts the stack there. When you run `outpost connect`, it forwards published ports to your localhost.
@@ -130,11 +130,33 @@ Use `--host NAME` on any command to target a specific host without changing the 
 
 ### Projects and Compose
 
-In each repository, run `outpost init` once. It detects `docker-compose.yml` or `compose.yaml` and writes `.outpost/project.yaml` with a stable project name.
+In each repository, run `outpost init` once. It creates a `.outpost/` directory with your project configuration.
+
+#### The `.outpost/` folder (in your repo)
+
+When you run `outpost init`, Outpost creates a `.outpost/` directory at the root of your repository. This is **local project metadata** — it tells the CLI how to map your repo to a remote workspace. It is **never synced** to the remote host (Outpost always excludes `.outpost/` from mirror uploads).
+
+| File | Purpose |
+|------|---------|
+| `project.yaml` | Stable project name, optional host override, compose file list, and remote directory path |
+| `.outpostignore` | Patterns for files/folders to exclude from mirror sync (same syntax as `.gitignore`) |
+
+**Should you commit it?** By default, yes — commit `.outpost/` so teammates use the same project name and land in the same remote directory. If you prefer per-developer settings, run `outpost init --write-gitignore` to keep `.outpost/` out of git.
+
+```text
+my-repo/
+├── .outpost/
+│   ├── project.yaml      # shared project config (usually committed)
+│   └── .outpostignore    # mirror sync exclusions (edit as needed)
+├── docker-compose.yml
+└── src/
+```
+
+This is separate from `~/.outpost/` on your machine, which stores global CLI state (registered hosts, SSH keys, port-forward sessions). See [Configuration](#configuration) below.
 
 ```bash
 outpost init --name my-api           # set a stable name (defaults to repo folder name)
-outpost init --write-gitignore       # add .outpost/ to .gitignore
+outpost init --write-gitignore       # keep .outpost/ local instead of committing it
 
 outpost compose up -d
 outpost compose ps
@@ -146,15 +168,36 @@ outpost docker ps
 outpost docker logs my-container
 ```
 
-`compose up`, `build`, and `pull` sync your compose files to the host before running. Commit `.outpost/project.yaml` to git so teammates use the same remote project. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+`compose up`, `build`, and `pull` sync your compose files to the host before running. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+
+Create `.outpost/.outpostignore` (created automatically by `outpost init`) to exclude paths from mirror sync. Same syntax as `.gitignore`. In git repositories, it applies **in addition to** `.gitignore`:
+
+```gitignore
+# .outpost/.outpostignore
+node_modules/
+.venv/
+dist/
+*.log
+```
+
+Built-in excludes always apply: `.git/`, `.outpost/`, `.DS_Store`.
 
 ### Remote mirror
 
-Run scripts and commands on the host from your local repo without copying large generated outputs back to your laptop. Mirror syncs your repository (respecting `.gitignore`), runs commands in the project's remote directory, and supports detached tmux sessions that survive disconnects.
+Run scripts and commands on the host from your local repo without copying large generated outputs back to your laptop. Mirror syncs your repository (respecting `.gitignore` and `.outpost/.outpostignore`), runs commands in the project's remote directory, and supports detached tmux sessions that survive disconnects.
 
 ```bash
 outpost mirror sync
+outpost mirror sync --rsync              # faster incremental sync (requires rsync on both sides)
+outpost mirror sync --workers 8          # parallel SFTP uploads (default: 6)
+
+outpost mirror watch                     # continuously sync changes (Ctrl+C to stop)
+outpost mirror watch --rsync             # rsync on each debounced change
+outpost mirror watch --debounce 500ms
+
 outpost mirror run node scripts/generate.js
+outpost mirror run --sync -- npm test          # force sync even if nothing changed locally
+outpost mirror run --no-sync -- python script.py # never sync
 outpost mirror run -d --name gen node scripts/generate-40k.js
 
 outpost mirror sessions list
@@ -164,9 +207,12 @@ outpost mirror sessions kill gen
 
 # Python (remote-only .venv — never synced from your laptop)
 outpost mirror setup-python
+outpost mirror setup-python --rsync
 outpost mirror run python scripts/train.py
 outpost mirror shell
 ```
+
+**Automatic sync skipping:** `mirror run` and `compose up` skip syncing when local files have not changed since the last successful sync, or when `mirror watch` is already running in another terminal. Use `mirror run --sync` to force a sync.
 
 For script-only repositories without Docker Compose, initialize with `outpost init --no-compose`.
 
@@ -245,13 +291,15 @@ Members can run workloads (`docker`, `compose`, `connect`, `kubectl`, etc.) but 
 
 ```bash
 outpost host create personal --provider aws --region eu-west-1
-outpost host start personal
-outpost host stop personal
+outpost host stop personal            # stop EC2 instance, pause compute billing
+outpost host start personal           # start again and wait for SSH
 outpost host restart personal
 outpost host resize personal --instance-type t3.large
 outpost host remove personal           # remove from local config only
 outpost host destroy personal          # terminate the EC2 instance
 ```
+
+`stop` pauses the instance without deleting it — you avoid EC2 compute charges while it is stopped. Attached EBS volumes (and Elastic IPs) may still bill. `start` brings the host back and waits for SSH.
 
 `host remove` only forgets the host in your local config — the server keeps running. `host destroy` terminates the cloud instance.
 
@@ -327,13 +375,34 @@ outpost prune volumes   # explicit: unused named volumes
 
 ## Configuration
 
-Outpost stores two kinds of configuration:
+Outpost stores configuration in two places:
 
 
-| Location                 | Purpose                                        |
-| ------------------------ | ---------------------------------------------- |
-| `~/.outpost/config.yaml` | Registered hosts, active host, AWS defaults    |
-| `.outpost/project.yaml`  | Per-repo project name, host, and compose files |
+| Location | Scope | Purpose |
+| -------- | ----- | ------- |
+| `~/.outpost/` | Your machine (global) | Registered hosts, SSH keys, active host, port-forward sessions, volume archives |
+| `.outpost/` | Each repository (local) | Project name, host override, compose files, mirror sync ignore rules |
+
+### Global config (`~/.outpost/`)
+
+Created automatically on first use. You normally do not edit these by hand.
+
+| File / directory | Purpose |
+| ---------------- | ------- |
+| `config.yaml` | Registered hosts, active host, AWS defaults |
+| `identities/` | SSH keys generated for cloud hosts |
+| `sessions/` | Active port-forward session metadata |
+| `archives/` | Exported Docker volume backups |
+| `sync-state/` | Local fingerprints used to skip redundant syncs |
+
+### Project config (`.outpost/` in your repo)
+
+Created by `outpost init`. Not uploaded to the remote host.
+
+| File | Purpose |
+| ---- | ------- |
+| `project.yaml` | Per-repo project name, host, and compose files |
+| `.outpostignore` | Extra ignore rules for `mirror sync` / `mirror watch` |
 
 
 Example project config (created by `outpost init`):

@@ -116,6 +116,9 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 		return err
 	}
 
+	if s.Out != nil {
+		s.Out.Step("Launching machine %q...", name)
+	}
 	memLimit := FormatSize(opts.MemoryBytes)
 	diskLimit := FormatSize(opts.DiskBytes)
 	launchParts := []string{
@@ -235,7 +238,16 @@ func (s *Service) Start(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	return s.runIncusAction(ctx, "start", incusName)
+	if s.Out != nil {
+		s.Out.Step("Starting machine %q...", name)
+	}
+	if err := s.runIncusAction(ctx, "start", incusName); err != nil {
+		return err
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Success("Machine %q started", name)
+	}
+	return nil
 }
 
 func (s *Service) Stop(ctx context.Context, name string) error {
@@ -243,7 +255,16 @@ func (s *Service) Stop(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	return s.runIncusAction(ctx, "stop", incusName)
+	if s.Out != nil {
+		s.Out.Step("Stopping machine %q...", name)
+	}
+	if err := s.runIncusAction(ctx, "stop", incusName); err != nil {
+		return err
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Success("Machine %q stopped", name)
+	}
+	return nil
 }
 
 func (s *Service) Restart(ctx context.Context, name string) error {
@@ -251,7 +272,16 @@ func (s *Service) Restart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	return s.runIncusAction(ctx, "restart", incusName)
+	if s.Out != nil {
+		s.Out.Step("Restarting machine %q...", name)
+	}
+	if err := s.runIncusAction(ctx, "restart", incusName); err != nil {
+		return err
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Success("Machine %q restarted", name)
+	}
+	return nil
 }
 
 func (s *Service) SnapshotCreate(ctx context.Context, name, snapName string) error {
@@ -261,6 +291,9 @@ func (s *Service) SnapshotCreate(ctx context.Context, name, snapName string) err
 	}
 	if strings.TrimSpace(snapName) == "" {
 		snapName = fmt.Sprintf("snap-%d", time.Now().Unix())
+	}
+	if s.Out != nil {
+		s.Out.Step("Creating snapshot %q for machine %q...", snapName, name)
 	}
 	cmd, err := s.incusCommand(ctx, fmt.Sprintf("snapshot create %s %s", shellQuote(incusName), shellQuote(snapName)))
 	if err != nil {
@@ -272,6 +305,9 @@ func (s *Service) SnapshotCreate(ctx context.Context, name, snapName string) err
 	}
 	if code != 0 {
 		return fmt.Errorf("incus snapshot create failed (exit %d)", code)
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Success("Snapshot %q created for machine %q", snapName, name)
 	}
 	return nil
 }
@@ -304,6 +340,9 @@ func (s *Service) SnapshotDelete(ctx context.Context, name, snapName string) err
 	if err != nil {
 		return err
 	}
+	if s.Out != nil {
+		s.Out.Step("Deleting snapshot %q from machine %q...", snapName, name)
+	}
 	cmd, err := s.incusCommand(ctx, fmt.Sprintf("delete %s/%s", shellQuote(incusName), shellQuote(snapName)))
 	if err != nil {
 		return err
@@ -314,6 +353,9 @@ func (s *Service) SnapshotDelete(ctx context.Context, name, snapName string) err
 	}
 	if code != 0 {
 		return fmt.Errorf("incus snapshot delete failed (exit %d)", code)
+	}
+	if s.Out != nil && !s.Out.JSON {
+		s.Out.Success("Snapshot %q deleted from machine %q", snapName, name)
 	}
 	return nil
 }
@@ -355,6 +397,9 @@ func (s *Service) instanceDiskBytes(ctx context.Context, incusName string) (uint
 
 func (s *Service) Delete(ctx context.Context, name string) error {
 	safe := config.SanitizeMachineName(name)
+	if s.Out != nil {
+		s.Out.Step("Deleting machine %q...", name)
+	}
 	meta, err := s.loadMeta(ctx, safe)
 	incusName := IncusName(name)
 	if err == nil {

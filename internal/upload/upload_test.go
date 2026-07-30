@@ -21,7 +21,7 @@ func TestSyncProjectUploadsCompose(t *testing.T) {
 		ComposeFiles: []string{"docker-compose.yml"},
 	}
 	exec := mock.New()
-	require.NoError(t, upload.SyncProject(dir, proj, exec))
+	require.NoError(t, upload.SyncProject(dir, proj, exec, nil))
 	require.Contains(t, exec.Uploads, "/var/lib/outpost/projects/demo/docker-compose.yml")
 }
 
@@ -48,7 +48,7 @@ services:
 		ComposeFiles: []string{"docker-compose.yml"},
 	}
 	exec := mock.New()
-	require.NoError(t, upload.SyncProject(dir, proj, exec))
+	require.NoError(t, upload.SyncProject(dir, proj, exec, nil))
 
 	require.Contains(t, exec.Uploads, "/var/lib/outpost/projects/demo/docker-compose.yml")
 	require.Contains(t, exec.Uploads, "/var/lib/outpost/projects/demo/Dockerfile")

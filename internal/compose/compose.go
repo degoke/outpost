@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/output"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/degoke/outpost/internal/upload"
 )
@@ -17,6 +18,7 @@ type Runner struct {
 	Cwd      string
 	HostName string
 	ForceYes bool
+	Out      *output.Printer
 }
 
 func (r *Runner) BuildCommand(subcommand string, args []string) string {
@@ -63,7 +65,7 @@ func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uplo
 		return 1, err
 	}
 	if uploadFirst {
-		if err := upload.SyncProject(r.Cwd, r.Project, r.Exec); err != nil {
+		if err := r.syncProjectIfNeeded(); err != nil {
 			return 1, err
 		}
 	}

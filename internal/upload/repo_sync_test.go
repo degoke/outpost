@@ -55,7 +55,7 @@ func TestSyncRepoUploadsFiles(t *testing.T) {
 		RemoteDir: "/var/lib/outpost/projects/demo",
 	}
 	exec := mock.New()
-	require.NoError(t, upload.SyncRepo(dir, proj, exec))
+	require.NoError(t, upload.SyncRepo(dir, proj, exec, nil))
 	require.Contains(t, exec.Uploads, "/var/lib/outpost/projects/demo/script.py")
 }
 

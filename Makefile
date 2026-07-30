@@ -1,4 +1,4 @@
-.PHONY: build test install fmt fmt-check lint vet ci ui-install ui-run ui-build ui-format ui-format-check ui-lint ui-ci
+.PHONY: build test test-cli install fmt fmt-check lint vet ci ui-install ui-run ui-build ui-format ui-format-check ui-lint ui-ci
 
 BINARY := bin/outpost
 PNPM := corepack pnpm@10.29.3
@@ -11,6 +11,9 @@ install:
 
 test:
 	go test -race -count=1 ./...
+
+test-cli:
+	go test -race -count=1 -v ./internal/cli/...
 
 fmt:
 	gofmt -w .

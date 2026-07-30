@@ -47,7 +47,7 @@ func TestListSessionsFiltersProjectPrefix(t *testing.T) {
 	}{Stdout: "running\n"}
 
 	proj := &config.Project{Name: "demo", RemoteDir: "/var/lib/outpost/projects/demo"}
-	runner := mirror.New(exec, proj, t.TempDir(), "personal")
+	runner := mirror.New(exec, proj, t.TempDir(), "personal", nil)
 	sessions, err := runner.ListSessions(context.Background())
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
@@ -76,7 +76,7 @@ func TestParseExitLineViaStatus(t *testing.T) {
 	}{Stdout: logTail}
 
 	proj := &config.Project{Name: "demo", RemoteDir: remoteDir}
-	runner := mirror.New(exec, proj, t.TempDir(), "personal")
+	runner := mirror.New(exec, proj, t.TempDir(), "personal", nil)
 	status, err := runner.SessionStatus(context.Background(), "gen")
 	require.NoError(t, err)
 	require.NotNil(t, status.ExitCode)

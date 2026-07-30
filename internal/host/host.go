@@ -10,6 +10,7 @@ import (
 	"github.com/degoke/outpost/internal/bootstrap"
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/output"
+	"github.com/degoke/outpost/internal/provider"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/google/uuid"
 )
@@ -85,10 +86,7 @@ func (s *Service) Add(ctx context.Context, opts AddOpts) error {
 		return err
 	}
 	if !opts.SkipBootstrap {
-		if s.Out != nil && !s.Out.JSON {
-			s.Out.Info("Checking remote dependencies...")
-		}
-		if err := bootstrap.Ensure(ctx, exec); err != nil {
+		if err := bootstrap.EnsureWithOut(ctx, exec, s.Out); err != nil {
 			return err
 		}
 	}
@@ -147,7 +145,7 @@ func (s *Service) List() error {
 		if name == s.Global.ActiveHost {
 			marker = "*"
 		}
-		s.Out.Info("%s %s  %s@%s:%d  role=%s", marker, name, orDash(h.User), orDash(h.Hostname), h.Port, h.Role)
+		s.Out.Info("%s %s  %s@%s:%d  role=%s%s", marker, name, orDash(h.User), orDash(h.Hostname), h.Port, h.Role, cloudHostSuffix(h))
 	}
 	return nil
 }
@@ -157,6 +155,17 @@ func orDash(s string) string {
 		return "(none)"
 	}
 	return s
+}
+
+func cloudHostSuffix(h *config.Host) string {
+	if h == nil || h.Provider == nil {
+		return ""
+	}
+	state := strings.TrimSpace(h.Provider.State)
+	if state == "" {
+		state = provider.StateUnknown
+	}
+	return fmt.Sprintf("  cloud=%s state=%s", h.Provider.Name, state)
 }
 
 func (s *Service) Use(name string) error {
@@ -224,7 +233,7 @@ func (s *Service) Verify(ctx context.Context, hostName string, skipBootstrap boo
 			"latency": latency.String(),
 		}
 		if !skipBootstrap {
-			if err := bootstrap.Ensure(ctx, exec); err != nil {
+			if err := bootstrap.EnsureWithOut(ctx, exec, s.Out); err != nil {
 				result["bootstrap"] = "failed"
 				result["error"] = err.Error()
 				_ = s.Out.PrintJSON(result)
@@ -236,8 +245,7 @@ func (s *Service) Verify(ctx context.Context, hostName string, skipBootstrap boo
 	}
 	s.Out.Success("Connected to %s (%s) in %s", h.Name, exec.HostInfo(), latency.Round(time.Millisecond))
 	if !skipBootstrap {
-		s.Out.Info("Checking remote dependencies...")
-		if err := bootstrap.Ensure(ctx, exec); err != nil {
+		if err := bootstrap.EnsureWithOut(ctx, exec, s.Out); err != nil {
 			return err
 		}
 		s.Out.Success("Remote host is ready (Docker and Docker Compose available)")

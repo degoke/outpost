@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,17 +40,25 @@ func TestGlobalResolveHost(t *testing.T) {
 }
 
 func TestResetLocal(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), ".outpost")
+	testenv.UseConfigDir(t, dir)
 
-	dir, err := config.ConfigDir()
-	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "identities", "host-1"), 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("version: 1\n"), 0600))
 
 	require.NoError(t, config.ResetLocal())
 
-	_, err = os.Stat(dir)
+	_, err := os.Stat(dir)
 	require.True(t, os.IsNotExist(err))
 
 	require.NoError(t, config.ResetLocal())
+}
+
+func TestConfigDirRespectsEnvOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "custom-outpost")
+	testenv.UseConfigDir(t, dir)
+
+	got, err := config.ConfigDir()
+	require.NoError(t, err)
+	require.Equal(t, dir, got)
 }

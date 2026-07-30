@@ -209,10 +209,20 @@ outpost mirror sessions kill gen
 outpost mirror setup-python
 outpost mirror setup-python --rsync
 outpost mirror run python scripts/train.py
+
+# Toolchain (auto-install make, Go, etc. on the remote host)
+outpost mirror toolchain plan
+outpost mirror toolchain plan make build
+outpost mirror setup-toolchain
+outpost mirror run -- make build                 # installs missing deps before running
+outpost mirror run --no-toolchain -- make build  # skip toolchain install
+
 outpost mirror shell
 ```
 
 **Automatic sync skipping:** `mirror run` and `compose up` skip syncing when local files have not changed since the last successful sync, or when `mirror watch` is already running in another terminal. Use `mirror run --sync` to force a sync.
+
+**Automatic toolchain:** `mirror run` detects common build tools from `go.mod`, `Makefile`, and optional `toolchain` settings in `project.yaml`, then installs missing packages (via apt/yum) and Go runtimes under `/var/lib/outpost/toolchains/` on the remote host. Use `mirror toolchain plan` to preview requirements, `mirror setup-toolchain` to install without running a command, or `--no-toolchain` to skip.
 
 For script-only repositories without Docker Compose, initialize with `outpost init --no-compose`.
 
@@ -444,6 +454,9 @@ These flags work on every command:
 | Not enough resources     | Run `outpost capacity` before creating stacks, clusters, or machines.                                                     |
 | Start over locally       | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept.        |
 
+## Development
+
+`go test` and `make ci` automatically redirect `~/.outpost` to a temporary directory so your real hosts, keys, and kubeconfigs are not touched. To opt out (e.g. integration testing against a real config), set `OUTPOST_ALLOW_REAL_CONFIG=1`. You can also point tests at a specific directory with `OUTPOST_CONFIG_DIR=/path/to/config`.
 
 ## License
 

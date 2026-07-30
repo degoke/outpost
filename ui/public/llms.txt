@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 - `outpost mirror sync` — sync a repository to the host (SFTP with parallel uploads, or `--rsync`)
 - `outpost mirror watch` — continuously sync file changes while you edit locally
 - `outpost mirror run` — run commands in the mirrored project directory
+- `outpost mirror setup-toolchain` — install detected build tools (make, Go, etc.) on the remote host
 - `outpost invite create` — share host access with teammates
 
 ## Configuration

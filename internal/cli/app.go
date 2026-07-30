@@ -846,6 +846,8 @@ func (app *App) mirrorCmd() *cobra.Command {
 	cmd.AddCommand(app.mirrorSyncCmd())
 	cmd.AddCommand(app.mirrorWatchCmd())
 	cmd.AddCommand(app.mirrorSetupPythonCmd())
+	cmd.AddCommand(app.mirrorSetupToolchainCmd())
+	cmd.AddCommand(app.mirrorToolchainCmd())
 	cmd.AddCommand(app.mirrorRunCmd())
 	cmd.AddCommand(app.mirrorShellCmd())
 	cmd.AddCommand(app.mirrorSessionsCmd())
@@ -934,12 +936,86 @@ func (app *App) mirrorSetupPythonCmd() *cobra.Command {
 	return cmd
 }
 
+func (app *App) mirrorSetupToolchainCmd() *cobra.Command {
+	var useRsync bool
+	var workers int
+	cmd := &cobra.Command{
+		Use:   "setup-toolchain",
+		Short: "Install project toolchain packages and runtimes on the remote host",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
+				runner.SyncUseRsync = useRsync
+				runner.SyncWorkers = workers
+				plan, err := runner.SetupToolchain(ctx)
+				if err != nil {
+					return err
+				}
+				if app.Out.JSON {
+					return app.Out.PrintJSON(plan)
+				}
+				if plan.Empty() {
+					app.Out.Info("No toolchain requirements detected")
+					return nil
+				}
+				app.Out.Success("Remote toolchain ready")
+				return nil
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for repository sync (requires rsync locally and on the remote)")
+	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
+	return cmd
+}
+
+func (app *App) mirrorToolchainCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "toolchain",
+		Short: "Inspect project toolchain requirements",
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "plan",
+		Short: "Show packages and runtimes that would be installed on the remote host",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			proj, err := config.LoadProject(app.Cwd)
+			if err != nil {
+				return err
+			}
+			commandArgs := args
+			if len(commandArgs) > 0 && commandArgs[0] == "--" {
+				commandArgs = commandArgs[1:]
+			}
+			command := strings.Join(commandArgs, " ")
+			plan, err := mirror.DetectPlan(app.Cwd, proj, command)
+			if err != nil {
+				return err
+			}
+			if app.Out.JSON {
+				return app.Out.PrintJSON(plan)
+			}
+			if plan.Empty() {
+				app.Out.Info("No toolchain requirements detected")
+				return nil
+			}
+			if len(plan.Packages) > 0 {
+				app.Out.Info("Packages: %s", strings.Join(plan.Packages, ", "))
+			}
+			if plan.GoVersion != "" {
+				app.Out.Info("Go: %s", plan.GoVersion)
+			}
+			return nil
+		},
+	})
+	return cmd
+}
+
 func (app *App) mirrorRunCmd() *cobra.Command {
 	var detach bool
 	var sessionName string
 	var noSync bool
 	var forceSync bool
 	var noVenv bool
+	var noToolchain bool
 	var useRsync bool
 	var workers int
 	cmd := &cobra.Command{
@@ -975,6 +1051,8 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 					forceSync = true
 				case "--no-venv":
 					noVenv = true
+				case "--no-toolchain":
+					noToolchain = true
 				case "--rsync":
 					useRsync = true
 				case "--workers":
@@ -1009,6 +1087,7 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 					NoSync:      noSync,
 					ForceSync:   forceSync,
 					NoVenv:      noVenv,
+					NoToolchain: noToolchain,
 					Command:     command,
 				})
 				if err != nil {

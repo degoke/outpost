@@ -9,6 +9,7 @@ import (
 	"github.com/degoke/outpost/internal/cli"
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/project"
+	"github.com/degoke/outpost/internal/testenv"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/degoke/outpost/internal/transport/mock"
 	"github.com/spf13/cobra"
@@ -44,6 +45,7 @@ func newCLIEnv(t *testing.T) *cliEnv {
 	home := t.TempDir()
 	cwd := t.TempDir()
 	t.Setenv("HOME", home)
+	testenv.UseHomeConfigDir(t, home)
 
 	writeTestGlobal(t, home)
 	setupProject(t, cwd)

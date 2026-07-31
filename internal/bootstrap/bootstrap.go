@@ -71,6 +71,47 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
+expand_root_filesystem() {
+  marker="$OUTPOST_BASE/.rootfs-expanded"
+  if [ -f "$marker" ]; then return 0; fi
+  root_source=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+  root_source=$(readlink -f "$root_source" 2>/dev/null || true)
+  root_fstype=$(findmnt -n -o FSTYPE / 2>/dev/null || true)
+  if [ -z "$root_source" ] || [ "$root_source" = "/" ]; then return 0; fi
+  if ! command -v growpart >/dev/null 2>&1; then
+    if [ "$family" = "debian" ]; then
+      $need_sudo apt-get update -qq
+      $need_sudo apt-get install -y -qq cloud-guest-utils
+    elif [ "$family" = "rhel" ]; then
+      $need_sudo yum install -y -q cloud-utils-growpart
+    fi
+  fi
+  if command -v growpart >/dev/null 2>&1; then
+    case "$root_source" in
+      /dev/nvme[0-9]n[0-9]p[0-9]*)
+        root_disk=$(printf '%s' "$root_source" | sed -E 's/p[0-9]+$//')
+        root_part=$(printf '%s' "$root_source" | sed -E 's/^.*p([0-9]+)$/\1/')
+        ;;
+      /dev/xvd[a-z][0-9]*|/dev/sd[a-z][0-9]*)
+        root_disk=$(printf '%s' "$root_source" | sed -E 's/[0-9]+$//')
+        root_part=$(printf '%s' "$root_source" | sed -E 's/^.*[^0-9]([0-9]+)$/\1/')
+        ;;
+      *) root_disk=""; root_part="" ;;
+    esac
+    if [ -n "$root_disk" ] && [ -n "$root_part" ]; then
+      $need_sudo growpart "$root_disk" "$root_part" >/dev/null 2>&1 || true
+    fi
+  fi
+  case "$root_fstype" in
+    ext2|ext3|ext4) $need_sudo resize2fs "$root_source" >/dev/null 2>&1 || true ;;
+    xfs) $need_sudo xfs_growfs / >/dev/null 2>&1 || true ;;
+    btrfs) $need_sudo btrfs filesystem resize max / >/dev/null 2>&1 || true ;;
+  esac
+  $need_sudo touch "$marker"
+}
+
+expand_root_filesystem
+
 $need_sudo mkdir -p "$OUTPOST_BASE/projects" "$OUTPOST_BASE/share"
 current_user="${SUDO_USER:-$USER}"
 if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
@@ -104,6 +145,13 @@ func Ensure(ctx context.Context, exec transport.Executor) error {
 	if ok, err := checkDocker(ctx, exec); err != nil {
 		return err
 	} else if ok {
+		code, err := exec.Run(ctx, bootstrapScript, transport.RunOpts{})
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			return fmt.Errorf("remote bootstrap failed (exit %d)", code)
+		}
 		return ensureDirs(ctx, exec)
 	}
 	var stderr strings.Builder

@@ -14,24 +14,24 @@ Use an existing Linux server or let Outpost provision one on AWS. Share the host
 - **Kubernetes with kind or k3d** — create named clusters and run `kubectl` remotely.
 - **Linux machines with Incus** — system containers by default; full VMs when the host supports KVM.
 - **Local port forwarding** — reach remote services at `http://127.0.0.1:8080` from your machine.
-- **Remote mirror** — sync your repo and run commands on the host; detached tmux sessions survive disconnects.
+- **Remote development environments** — each project gets a managed container, with rsync-first sync and Dev Container support.
 - **Team sharing** — invite collaborators with device approval; owners keep control of the host and cloud account.
 
 
 
 ## How it works
 
-You install the Outpost CLI locally. It connects to your host over SSH, installs missing tools on first use, syncs project files, and runs commands remotely. There is no Outpost agent running on the server.
+You install the Outpost CLI locally. It connects to your host over SSH, syncs project files, and manages a per-project development container on the remote host. There is no permanent Outpost agent running on the server.
 
 ```text
 Your machine                Remote Linux host
 ─────────────               ─────────────────
-outpost CLI        SSH  →   Docker + Compose
+outpost CLI        SSH  →   Docker + Compose + project containers
 ~/.outpost/ (global)        kind, k3d + kubectl
 .outpost/ (per repo)        Incus
 ```
 
-When you run `outpost compose up`, Outpost uploads your compose files (and `.env` if present) to the host and starts the stack there. When you run `outpost connect`, it forwards published ports to your localhost.
+The normal workflow is `outpost init`, `outpost shell`, `outpost run`, `outpost up`, and `outpost open`. `init` syncs the repository, creates the managed project container, and opens a shell; the other commands reuse that environment.
 
 ## Install
 
@@ -87,14 +87,15 @@ outpost host add personal --hostname 203.0.113.10 --user ubuntu --auth key --ide
 # 2. Re-verify later if needed
 outpost host verify
 
-# 3. Initialize your project (in a repo with docker-compose.yml)
+# 3. Initialize the project (in a repo with docker-compose.yml or .devcontainer/)
 outpost init
 
-# 4. Start your stack
-outpost compose up -d
+# 4. Re-enter the project shell later
+outpost shell
 
-# 5. Forward ports to your machine
-outpost connect
+# 5. Start services and forward ports when needed
+outpost up
+outpost open
 ```
 
 Your services are now available on localhost — for example `http://127.0.0.1:8080` if that port is published in compose.
@@ -107,11 +108,11 @@ outpost host create personal --provider aws --region eu-west-1
 outpost host verify
 
 outpost init
-outpost compose up -d
-outpost connect
+outpost up
+outpost open
 ```
 
-Outpost creates the EC2 instance, configures SSH, installs Docker, and registers the host. You can start, stop, resize, or destroy it with `outpost host` commands.
+Outpost creates the EC2 instance with a 20 GiB minimum gp3 root volume, configures SSH, installs Docker, and registers the host. You can start, stop, resize, or destroy it with `outpost host` commands.
 
 ## Day-to-day usage
 
@@ -128,18 +129,18 @@ outpost host capabilities            # see what the host supports (e.g. VMs)
 
 Use `--host NAME` on any command to target a specific host without changing the active one.
 
-### Projects and Compose
+### Projects
 
 In each repository, run `outpost init` once. It creates a `.outpost/` directory with your project configuration.
 
 #### The `.outpost/` folder (in your repo)
 
-When you run `outpost init`, Outpost creates a `.outpost/` directory at the root of your repository. This is **local project metadata** — it tells the CLI how to map your repo to a remote workspace. It is **never synced** to the remote host (Outpost always excludes `.outpost/` from mirror uploads).
+When you run `outpost init`, Outpost creates a `.outpost/` directory at the root of your repository. This is **local project metadata** — it tells the CLI how to map your repo to a remote workspace. It is **never synced** to the remote host.
 
 | File | Purpose |
 |------|---------|
-| `project.yaml` | Stable project name, optional host override, compose file list, and remote directory path |
-| `.outpostignore` | Patterns for files/folders to exclude from mirror sync (same syntax as `.gitignore`) |
+| `project.yaml` | Stable project name, optional host override, compose file list, environment settings, and remote directory path |
+| `.outpostignore` | Patterns for files/folders to exclude from sync (same syntax as `.gitignore`) |
 
 **Should you commit it?** By default, yes — commit `.outpost/` so teammates use the same project name and land in the same remote directory. If you prefer per-developer settings, run `outpost init --write-gitignore` to keep `.outpost/` out of git.
 
@@ -147,7 +148,7 @@ When you run `outpost init`, Outpost creates a `.outpost/` directory at the root
 my-repo/
 ├── .outpost/
 │   ├── project.yaml      # shared project config (usually committed)
-│   └── .outpostignore    # mirror sync exclusions (edit as needed)
+│   └── .outpostignore    # sync exclusions (edit as needed)
 ├── docker-compose.yml
 └── src/
 ```
@@ -158,19 +159,22 @@ This is separate from `~/.outpost/` on your machine, which stores global CLI sta
 outpost init --name my-api           # set a stable name (defaults to repo folder name)
 outpost init --write-gitignore       # keep .outpost/ local instead of committing it
 
-outpost compose up -d
-outpost compose ps
-outpost compose logs -f
-outpost compose exec api sh
-outpost compose down
+outpost shell
+outpost run -- npm test
+outpost up
+outpost status
+outpost logs -f
+outpost open
+outpost down
+outpost cleanup
 
 outpost docker ps
 outpost docker logs my-container
 ```
 
-`compose up`, `build`, and `pull` sync your compose files to the host before running. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+`up` syncs required files before running. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
 
-Create `.outpost/.outpostignore` (created automatically by `outpost init`) to exclude paths from mirror sync. Same syntax as `.gitignore`. In git repositories, it applies **in addition to** `.gitignore`:
+Create `.outpost/.outpostignore` (created automatically by `outpost init`) to exclude paths from sync. Same syntax as `.gitignore`. In git repositories, it applies **in addition to** `.gitignore`:
 
 ```gitignore
 # .outpost/.outpostignore
@@ -182,51 +186,13 @@ dist/
 
 Built-in excludes always apply: `.git/`, `.outpost/`, `.DS_Store`.
 
-### Remote mirror
+### Remote environment
 
-Run scripts and commands on the host from your local repo without copying large generated outputs back to your laptop. Mirror syncs your repository (respecting `.gitignore` and `.outpost/.outpostignore`), runs commands in the project's remote directory, and supports detached tmux sessions that survive disconnects.
+Each project gets one managed development container on the host. Source files sync with rsync (automatic SFTP fallback), and common dependency directories use persistent Docker volumes. `.devcontainer/devcontainer.json` is picked up automatically for image, workspace, environment, ports, mounts, and Dockerfile builds.
 
-```bash
-outpost mirror sync
-outpost mirror sync --rsync              # faster incremental sync (requires rsync on both sides)
-outpost mirror sync --workers 8          # parallel SFTP uploads (default: 6)
+For Python projects, `outpost run` automatically creates and uses a remote `.venv`. For Go, make, and other build tools, `outpost run` auto-installs the toolchain in the environment. Set `environment.enabled: false` in `.outpost/project.yaml` to opt out of the managed container and execute directly on the host.
 
-outpost mirror watch                     # continuously sync changes (Ctrl+C to stop)
-outpost mirror watch --rsync             # rsync on each debounced change
-outpost mirror watch --debounce 500ms
-
-outpost mirror run node scripts/generate.js
-outpost mirror run --sync -- npm test          # force sync even if nothing changed locally
-outpost mirror run --no-sync -- python script.py # never sync
-outpost mirror run -d --name gen node scripts/generate-40k.js
-
-outpost mirror sessions list
-outpost mirror sessions status gen
-outpost mirror sessions attach gen
-outpost mirror sessions kill gen
-
-# Python (remote-only .venv — never synced from your laptop)
-outpost mirror setup-python
-outpost mirror setup-python --rsync
-outpost mirror run python scripts/train.py
-
-# Toolchain (auto-install make, Go, etc. on the remote host)
-outpost mirror toolchain plan
-outpost mirror toolchain plan make build
-outpost mirror setup-toolchain
-outpost mirror run -- make build                 # installs missing deps before running
-outpost mirror run --no-toolchain -- make build  # skip toolchain install
-
-outpost mirror shell
-```
-
-**Automatic sync skipping:** `mirror run` and `compose up` skip syncing when local files have not changed since the last successful sync, or when `mirror watch` is already running in another terminal. Use `mirror run --sync` to force a sync.
-
-**Automatic toolchain:** `mirror run` detects common build tools from `go.mod`, `Makefile`, and optional `toolchain` settings in `project.yaml`, then installs missing packages (via apt/yum) and Go runtimes under `/var/lib/outpost/toolchains/` on the remote host. Use `mirror toolchain plan` to preview requirements, `mirror setup-toolchain` to install without running a command, or `--no-toolchain` to skip.
-
-For script-only repositories without Docker Compose, initialize with `outpost init --no-compose`.
-
-### Moving compose volumes between hosts
+### Moving volumes between hosts
 
 Named Docker volumes (for example Postgres data) stay on the host they were created on. Outpost can archive them locally and restore them on another host.
 
@@ -241,7 +207,7 @@ outpost compose volumes import
 outpost compose volumes list
 ```
 
-When you run `outpost compose up`, Outpost automatically offers to import missing or empty volumes that have local archives. Use `--yes` to skip the prompt.
+When you run `outpost up`, Outpost automatically offers to import missing or empty volumes that have local archives. Use `--yes` to skip the prompt.
 
 To move a project:
 
@@ -252,7 +218,7 @@ outpost compose volumes export
 # point the project at the new host in .outpost/project.yaml, then:
 outpost host use new-host
 outpost compose volumes import
-outpost compose up -d
+outpost up
 ```
 
 
@@ -260,11 +226,8 @@ outpost compose up -d
 ### Port forwarding
 
 ```bash
-outpost connect                      # forward all published compose ports
-outpost connect --service api        # one service only
-outpost connect --port 9090:80       # custom mapping
-outpost connect --status             # show active sessions
-outpost connect --down               # stop forwarding
+outpost open                         # forward/display project ports
+outpost open --port 9090:80          # custom mapping
 ```
 
 **Port already in use?** Stop the local process on that port, or override with `--local-port 18080` or `--port 9090:80`.
@@ -381,6 +344,7 @@ outpost top             # live container CPU and memory
 outpost top --watch
 outpost capacity        # free resources and recommendations
 outpost disk            # disk usage and reclaimable space
+outpost cleanup         # clean project-owned artifacts safely
 
 outpost prune --dry-run # preview cleanup
 outpost prune           # remove stopped containers, unused images, build cache
@@ -397,7 +361,7 @@ Outpost stores configuration in two places:
 | Location | Scope | Purpose |
 | -------- | ----- | ------- |
 | `~/.outpost/` | Your machine (global) | Registered hosts, SSH keys, active host, port-forward sessions, volume archives |
-| `.outpost/` | Each repository (local) | Project name, host override, compose files, mirror sync ignore rules |
+| `.outpost/` | Each repository (local) | Project name, host override, compose files, environment, cleanup, sync ignore rules |
 
 ### Global config (`~/.outpost/`)
 
@@ -417,8 +381,8 @@ Created by `outpost init`. Not uploaded to the remote host.
 
 | File | Purpose |
 | ---- | ------- |
-| `project.yaml` | Per-repo project name, host, and compose files |
-| `.outpostignore` | Extra ignore rules for `mirror sync` / `mirror watch` |
+| `project.yaml` | Per-repo project, remote environment, cleanup, and compose settings |
+| `.outpostignore` | Extra ignore rules for sync |
 
 
 Example project config (created by `outpost init`):
@@ -429,6 +393,13 @@ host: personal
 remote_dir: /var/lib/outpost/projects/my-api
 compose_files:
   - docker-compose.yml
+environment:
+  image: node:22-bookworm
+  workdir: /workspace
+  docker_socket: true
+cleanup:
+  log_retention_days: 7
+  build_cache_days: 14
 ```
 
 Use the same project name across your team so everyone targets the same remote stack.
@@ -455,24 +426,11 @@ These flags work on every command:
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | SSH connection fails     | Test with `ssh user@host`. Check hostname, user, port, and key. Pass `--identity-file` to `host add` if needed.           |
 | Bootstrap fails          | Ensure your user has `sudo` on the host. On unsupported distros, install Docker manually, then run `outpost host verify`. |
-| Port forwarding conflict | Run `outpost connect --status`. Use `--local-port` or `--port` to pick a different local port.                            |
+| Port forwarding conflict | Stop the local process on that port, or use `--local-port` or `--port` to pick a different local port.                    |
 | Member access denied     | Owner runs `outpost invite list` and approves the device.                                                                 |
 | Not enough resources     | Run `outpost capacity` before creating stacks, clusters, or machines.                                                     |
 | Start over locally       | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept.        |
 
-## Development
-
-`go test` and `make ci` automatically redirect `~/.outpost` to a temporary directory so your real hosts, keys, and kubeconfigs are not touched. To opt out (e.g. integration testing against a real config), set `OUTPOST_ALLOW_REAL_CONFIG=1`. You can also point tests at a specific directory with `OUTPOST_CONFIG_DIR=/path/to/config`.
-
-## Development
-
-```bash
-make test    # or: go test ./...
-```
-
-`go test` automatically redirects `~/.outpost` to a temporary directory so your real hosts, keys, and kubeconfigs are not touched. To opt out (e.g. integration testing against a real config), set `OUTPOST_ALLOW_REAL_CONFIG=1`. You can also point tests at a specific directory with `OUTPOST_CONFIG_DIR=/path/to/config`.
-
 ## License
 
 Outpost is open source software licensed under the [MIT License](LICENSE).
-

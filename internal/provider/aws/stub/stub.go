@@ -27,6 +27,7 @@ type EC2 struct {
 	Volumes        map[string]bool
 	DeletedSGs     []string
 	DeletedVolumes []string
+	LastRunInput   *ec2.RunInstancesInput
 }
 
 func New() *EC2 {
@@ -198,6 +199,7 @@ func (s *EC2) DeleteSecurityGroup(ctx context.Context, params *ec2.DeleteSecurit
 func (s *EC2) RunInstances(ctx context.Context, params *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.LastRunInput = params
 	id := fmt.Sprintf("i-%d", s.nextInst.Add(1))
 	volID := fmt.Sprintf("vol-%d", s.nextVol.Add(1))
 	s.Volumes[volID] = true

@@ -221,6 +221,7 @@ func (r *Runner) KillSession(ctx context.Context, shortName string) error {
 	if code != 0 {
 		return fmt.Errorf("session %q not found", shortName)
 	}
+	_, _ = r.Exec.Run(ctx, fmt.Sprintf("rm -f %s", shellQuote(remoteSessionLog(r.Proj, shortName))), transport.RunOpts{})
 	path, err := sessionMetaPath(r.Host, r.Proj.Name, shortName)
 	if err == nil {
 		_ = os.Remove(path)

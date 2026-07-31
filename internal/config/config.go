@@ -74,6 +74,46 @@ type Project struct {
 	Python       *ProjectPython      `yaml:"python,omitempty"`
 	Toolchain    *ProjectToolchain   `yaml:"toolchain,omitempty"`
 	Volumes      *ProjectVolumeState `yaml:"volumes,omitempty"`
+	Environment  *ProjectEnvironment `yaml:"environment,omitempty"`
+	Cleanup      *ProjectCleanup     `yaml:"cleanup,omitempty"`
+}
+
+// ProjectEnvironment describes the managed remote development container.
+type ProjectEnvironment struct {
+	Enabled          *bool             `yaml:"enabled,omitempty"`
+	Image            string            `yaml:"image,omitempty"`
+	Shell            string            `yaml:"shell,omitempty"`
+	Workdir          string            `yaml:"workdir,omitempty"`
+	DockerSocket     *bool             `yaml:"docker_socket,omitempty"`
+	Ports            []int             `yaml:"ports,omitempty"`
+	Volumes          []ProjectEnvMount `yaml:"volumes,omitempty"`
+	Environment      map[string]string `yaml:"env,omitempty"`
+	DevcontainerFile string            `yaml:"devcontainer_file,omitempty"`
+	BuildDockerfile  string            `yaml:"build_dockerfile,omitempty"`
+	BuildContext     string            `yaml:"build_context,omitempty"`
+}
+
+type ProjectEnvMount struct {
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
+}
+
+// EnvironmentEnabled reports whether the managed container should be used.
+func (p *Project) EnvironmentEnabled() bool {
+	return p != nil && p.Environment != nil && (p.Environment.Enabled == nil || *p.Environment.Enabled)
+}
+
+// ProjectCleanup controls automatic retention for managed remote artifacts.
+type ProjectCleanup struct {
+	Enabled              *bool `yaml:"enabled,omitempty"`
+	LogRetentionDays     int   `yaml:"log_retention_days,omitempty"`
+	BuildCacheDays       int   `yaml:"build_cache_days,omitempty"`
+	StoppedContainerDays int   `yaml:"stopped_container_days,omitempty"`
+	MaxProjectGiB        int   `yaml:"max_project_gib,omitempty"`
+}
+
+func (p *Project) CleanupEnabled() bool {
+	return p == nil || p.Cleanup == nil || p.Cleanup.Enabled == nil || *p.Cleanup.Enabled
 }
 
 type ProjectToolchain struct {
@@ -98,7 +138,7 @@ type ProjectPython struct {
 // RequireCompose reports whether the project has compose files configured.
 func (p *Project) RequireCompose() error {
 	if p == nil || len(p.ComposeFiles) == 0 {
-		return fmt.Errorf("no compose files configured — add docker-compose.yml and run 'outpost init', or use 'outpost mirror' for script-only projects")
+		return fmt.Errorf("no compose files configured — add a Compose file and re-run 'outpost init' before using Compose commands")
 	}
 	return nil
 }
@@ -240,6 +280,11 @@ func LoadProject(cwd string) (*Project, error) {
 	var p Project
 	if err := yaml.Unmarshal(data, &p); err != nil {
 		return nil, fmt.Errorf("parse project %s: %w", path, err)
+	}
+	// Existing projects opt into the managed environment on first load. Tests and
+	// library callers that construct Project values directly retain legacy behavior.
+	if p.Environment == nil {
+		p.Environment = &ProjectEnvironment{}
 	}
 	return &p, nil
 }

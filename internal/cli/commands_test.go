@@ -37,7 +37,7 @@ func TestCLIInit(t *testing.T) {
 	app.Cwd = cwd
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
-	root.SetArgs([]string{"init", "--name", "myapp"})
+	root.SetArgs([]string{"init", "--name", "myapp", "--no-shell"})
 	require.NoError(t, root.Execute())
 
 	data, err := os.ReadFile(filepath.Join(cwd, ".outpost", "project.yaml"))
@@ -98,6 +98,7 @@ hosts:
 func TestCLICommands(t *testing.T) {
 	cases := []cliCase{
 		{name: "host list", args: []string{"host", "list"}},
+		{name: "use", args: []string{"use", "dev"}},
 		{name: "host capabilities", args: []string{"host", "capabilities"}},
 		{name: "status", args: []string{"status"}},
 		{name: "top", args: []string{"top"}},
@@ -193,6 +194,13 @@ var untestableCLICommands = map[string]string{
 	"prune volumes":            "destructive volume removal",
 	"prune clusters":           "destructive cluster removal",
 	"prune machines":           "destructive machine removal",
+	"shell":                    "interactive remote development container",
+	"run":                      "executes a command in the remote development container",
+	"up":                       "uploads and starts the remote Compose project",
+	"down":                     "destructive remote Compose shutdown",
+	"logs":                     "may stream indefinitely",
+	"open":                     "starts background port forwarding",
+	"cleanup":                  "requires remote host cleanup execution",
 }
 
 func TestCLICommandCoverage(t *testing.T) {
@@ -200,6 +208,7 @@ func TestCLICommandCoverage(t *testing.T) {
 	tested := map[string]bool{
 		"host list":             true,
 		"host use":              true,
+		"use":                   true,
 		"host remove":           true,
 		"host capabilities":     true,
 		"host create":           true, // error-path smoke test

@@ -8,23 +8,30 @@ const INSTALL_COMMAND =
 const INSTALL_COMMAND_DISPLAY = "curl -fsSL …/install.sh | bash";
 const HERO_TERMINAL_DEMO = [
   {
-    command: "outpost compose up -d",
+    command: "outpost init",
     lines: [
       {
         className: "route",
         prefix: "→",
-        text: "Syncing project to host dev…",
+        text: "Syncing project to remote environment…",
       },
-      { className: "route", prefix: "→", text: "Uploading compose.yaml" },
-      { className: "ok", prefix: "✓", text: "Starting services…" },
+      {
+        className: "route",
+        prefix: "→",
+        text: "Creating managed dev container",
+      },
+      { className: "ok", prefix: "✓", text: "Project shell ready" },
     ],
   },
   {
-    command: "outpost connect",
+    command: "outpost run -- npm test",
     lines: [
-      { className: "ok", prefix: "✓", text: "Connected to dev over SSH" },
-      { type: "forward", from: "127.0.0.1:8080", to: "api:8080" },
-      { className: "dim", text: "Press Ctrl+C to stop forwarding." },
+      {
+        className: "ok",
+        prefix: "✓",
+        text: "Running inside outpost-dev-my-api",
+      },
+      { className: "ok", prefix: "✓", text: "Tests passed" },
     ],
   },
 ];
@@ -71,11 +78,11 @@ const WORKFLOW_TERMINAL_DEMO = [
     lines: [],
   },
   {
-    command: "outpost compose up -d",
+    command: "outpost up",
     lines: [{ className: "ok", prefix: "✓", text: "Stack my-api is running" }],
   },
   {
-    command: "outpost connect",
+    command: "outpost open",
     lines: [{ type: "forward", from: "http://127.0.0.1:8080", to: "api:8080" }],
   },
 ];
@@ -83,7 +90,7 @@ const groups = [
   [
     "getting-started",
     "Getting started",
-    "Install the CLI, connect a host, initialize a project, and start a remote stack.",
+    "Install the CLI, connect a host, and start a managed remote development environment.",
     [
       [
         "Install the CLI",
@@ -131,11 +138,15 @@ const groups = [
       [
         "Initialize and start",
         [
-          ["outpost init --name my-api", "Create project configuration"],
-          ["outpost compose up -d", "Start the remote stack"],
-          ["outpost connect", "Forward services to localhost"],
+          [
+            "outpost init --name my-api",
+            "Sync and start the project environment",
+          ],
+          ["outpost shell", "Open the remote development shell"],
+          ["outpost up", "Start project services"],
+          ["outpost open", "Forward services to localhost"],
         ],
-        "Create project configuration, start the stack, and forward ports to localhost.",
+        "Create the project environment, work inside it, start services, and forward ports to localhost.",
       ],
     ],
   ],
@@ -197,14 +208,14 @@ const groups = [
   [
     "projects",
     "Projects & Compose",
-    "Keep your repository local while Compose runs on the remote host.",
+    "Turn a repository into a managed remote development environment.",
     [
       [
         "The .outpost folder",
         [
           [
             "my-repo/.outpost/project.yaml",
-            "Project name, host override, and compose file list",
+            "Project name, environment, cleanup, host override, and compose files",
           ],
           [
             "my-repo/.outpost/.outpostignore",
@@ -220,14 +231,17 @@ const groups = [
       [
         "Initialize",
         [
-          ["outpost init", "Detect Compose files and write project config"],
+          [
+            "outpost init",
+            "Create project config, sync, and start the environment",
+          ],
           [
             "outpost init --name my-api --write-gitignore",
             "Keep .outpost/ local instead of committing project config",
           ],
           ["outpost init --no-compose", "Initialize a script-only repository"],
         ],
-        "Creates .outpost/project.yaml and .outpost/.outpostignore. See “The .outpost folder” above for what belongs in that directory.",
+        "Creates project metadata, syncs the repository, and opens the managed environment. Use --no-shell for automation. See “The .outpost folder” above for what belongs in that directory.",
       ],
       [
         "Ignore files from sync",
@@ -240,15 +254,28 @@ const groups = [
         "Works in all repositories. In git repos, patterns apply in addition to .gitignore. A legacy repo-root .outpostignore is still supported.",
       ],
       [
-        "Manage services",
+        "Develop and manage services",
         [
-          ["outpost compose up -d", "Start services in the background"],
-          ["outpost compose ps", "List running services"],
-          ["outpost compose logs -f", "Follow service logs"],
-          ["outpost compose exec api sh", "Open a shell in a service"],
-          ["outpost compose down", "Stop and remove the stack"],
+          ["outpost shell", "Open the project development shell"],
+          ["outpost run -- npm test", "Run a command remotely"],
+          ["outpost up", "Start services in the background"],
+          ["outpost status", "Show project and service status"],
+          ["outpost logs -f", "Follow service logs"],
+          ["outpost down", "Stop the project environment"],
         ],
-        "Start, inspect, debug, enter, and stop your stack.",
+        "The project-first commands cover the common workflow.",
+      ],
+      [
+        "Development environment",
+        [
+          [
+            ".devcontainer/devcontainer.json",
+            "Reuse image, ports, env, mounts, and build settings",
+          ],
+          ["outpost open", "Forward project ports to localhost"],
+          ["outpost cleanup", "Clean stale managed artifacts and logs"],
+        ],
+        "Outpost provides a CLI-first remote equivalent of Dev Containers, with one managed container per project.",
       ],
       [
         "Use Docker",
@@ -272,107 +299,20 @@ const groups = [
   [
     "mirror",
     "Remote mirror",
-    "Sync a repository and execute work remotely without moving generated output back to your laptop.",
+    "Advanced sync, detached sessions, and direct remote execution.",
     [
       [
         "Sync and run",
         [
-          ["outpost mirror sync", "Mirror the repository to the host"],
+          ["outpost mirror sync", "Manually sync the repository"],
+          ["outpost mirror run -- make build", "Run a command remotely"],
           [
-            "outpost mirror sync --rsync",
-            "Use rsync for faster incremental sync (requires rsync locally and on the host)",
+            "outpost mirror run -d --name job -- ./long-task.sh",
+            "Detached session",
           ],
-          [
-            "outpost mirror sync --workers 8",
-            "Upload files in parallel over SFTP (default: 6 workers)",
-          ],
-          [
-            "outpost mirror run node scripts/generate.js",
-            "Run a command in the remote project directory",
-          ],
-          [
-            "outpost mirror run --sync -- npm test",
-            "Force a sync even when local files are unchanged",
-          ],
-          [
-            "outpost mirror run --no-sync -- python script.py",
-            "Run without syncing",
-          ],
+          ["outpost mirror sessions list", "List active sessions"],
         ],
-        "Mirror the repository and run commands in its remote directory. Sync is skipped automatically when nothing changed locally or mirror watch is already running.",
-      ],
-      [
-        "Watch for changes",
-        [
-          [
-            "outpost mirror watch",
-            "Continuously sync file changes to the host (SFTP mode)",
-          ],
-          [
-            "outpost mirror watch --rsync",
-            "Re-sync with rsync on each debounced change",
-          ],
-          [
-            "outpost mirror watch --debounce 500ms",
-            "Wait longer before syncing bursts of edits",
-          ],
-        ],
-        "Keep the remote copy up to date while you edit locally. mirror run detects an active watch and skips its own sync. Press Ctrl+C to stop.",
-      ],
-      [
-        "Keep a session alive",
-        [
-          [
-            "outpost mirror run -d --name gen node scripts/generate-40k.js",
-            "Start detached work in tmux",
-          ],
-          ["outpost mirror sessions list", "List detached sessions"],
-          ["outpost mirror sessions status gen", "Check session status"],
-          ["outpost mirror sessions attach gen", "Reconnect to a session"],
-          ["outpost mirror sessions kill gen", "Stop a detached session"],
-        ],
-        "Run detached work in tmux and reconnect later.",
-      ],
-      [
-        "Use Python remotely",
-        [
-          [
-            "outpost mirror setup-python",
-            "Create a remote virtual environment",
-          ],
-          [
-            "outpost mirror setup-python --rsync",
-            "Sync the repo with rsync before creating the venv",
-          ],
-          [
-            "outpost mirror run python scripts/train.py",
-            "Run Python in the remote environment",
-          ],
-          ["outpost mirror shell", "Open a shell in the mirrored project"],
-        ],
-        "Create a remote-only virtual environment and work inside it. The local .venv is never synced.",
-      ],
-      [
-        "Install build tools remotely",
-        [
-          [
-            "outpost mirror toolchain plan",
-            "Preview packages and Go versions to install",
-          ],
-          [
-            "outpost mirror setup-toolchain",
-            "Install detected toolchain on the remote host",
-          ],
-          [
-            "outpost mirror run -- make build",
-            "Auto-install missing tools before running",
-          ],
-          [
-            "outpost mirror run --no-toolchain -- make build",
-            "Skip toolchain installation",
-          ],
-        ],
-        "Detect make, Go, and other build tools from go.mod, Makefile, and project.yaml. Installs to /var/lib/outpost/toolchains/ on the remote host.",
+        "Advanced remote execution and detached sessions that survive disconnects. For everyday use, prefer outpost shell and outpost run.",
       ],
     ],
   ],
@@ -384,19 +324,10 @@ const groups = [
       [
         "Forward services",
         [
-          ["outpost connect", "Forward all published ports"],
-          ["outpost connect --service api", "Forward one service"],
-          ["outpost connect --port 9090:80", "Forward a custom port mapping"],
+          ["outpost open", "Forward all project ports"],
+          ["outpost open --port 9090:80", "Forward a custom port mapping"],
         ],
-        "Forward all published ports, one service, or a custom mapping.",
-      ],
-      [
-        "Inspect or stop",
-        [
-          ["outpost connect --status", "View active forwarding sessions"],
-          ["outpost connect --down", "Stop port forwarding"],
-        ],
-        "View active sessions or stop forwarding.",
+        "Forward all published ports or a custom mapping.",
       ],
       [
         "Connect a machine",
@@ -559,6 +490,7 @@ const groups = [
           ["outpost top --watch", "Watch usage continuously"],
           ["outpost capacity", "Inspect host capacity"],
           ["outpost disk", "Check disk pressure"],
+          ["outpost cleanup", "Clean project-owned artifacts and logs"],
         ],
         "Review workload health, live resource usage, capacity, and disk.",
       ],
@@ -569,7 +501,7 @@ const groups = [
           ["outpost prune", "Remove unused containers and images"],
           ["outpost prune volumes", "Remove unused volumes"],
         ],
-        "Preview or remove stopped containers, unused images, build cache, and volumes.",
+        "Project cleanup is automatic and settings-driven; use prune for explicit broader host cleanup.",
       ],
     ],
   ],
@@ -579,20 +511,32 @@ const groups = [
     "Every command, including passthrough tools and local configuration.",
     [
       [
+        "Project-first workflow",
+        [
+          [
+            "outpost init [--no-shell]",
+            "Create and start the managed project environment",
+          ],
+          ["outpost shell", "Open a project shell"],
+          ["outpost run -- COMMAND", "Run a command in the project container"],
+          [
+            "outpost up|down|logs|open|status|cleanup",
+            "Manage the project lifecycle",
+          ],
+        ],
+        "The project-first commands cover the normal workflow.",
+      ],
+      [
         "Remote runtime commands",
         [
           ["outpost docker [args...]", "Run any Docker command remotely"],
           [
-            "outpost compose build|pull|up|down|ps|logs|exec",
-            "Run Compose commands remotely",
-          ],
-          [
             "outpost kubectl --cluster NAME [args...]",
             "Run any kubectl command remotely",
           ],
-          ["outpost connect [flags]", "Forward Compose ports to localhost"],
+          ["outpost open [flags]", "Forward project ports to localhost"],
         ],
-        "Docker, Compose, and kubectl pass their remaining arguments to the remote tool, so the full underlying command surface remains available.",
+        "Docker and kubectl pass their remaining arguments to the remote tool, so the full underlying command surface remains available.",
       ],
       [
         "Host and provider commands",
@@ -618,40 +562,23 @@ const groups = [
         "Use remove to delete local registration only; use destroy to terminate a cloud host. Host creation also supports --provider, --region, --profile, --instance-type, --ssh-cidr, and --no-cleanup.",
       ],
       [
-        "Projects, mirrors, and sessions",
+        "Projects and sessions",
         [
           ["outpost init [flags]", "Create .outpost/project.yaml"],
           [
-            "outpost mirror sync [--rsync] [--workers N]",
-            "Sync the repository to the host",
-          ],
-          [
-            "outpost mirror watch [--rsync] [--workers N] [--debounce DURATION]",
-            "Continuously sync local changes to the host",
-          ],
-          ["outpost mirror shell", "Open a shell in the remote project"],
-          [
-            "outpost mirror setup-python [--rsync] [--workers N]",
-            "Create a remote Python environment",
-          ],
-          [
-            "outpost mirror setup-toolchain [--rsync] [--workers N]",
-            "Install project toolchain on the remote host",
-          ],
-          [
-            "outpost mirror toolchain plan [COMMAND]",
-            "Preview toolchain requirements",
+            "outpost mirror sync [--sftp] [--workers N]",
+            "Manual repository sync",
           ],
           [
             "outpost mirror run [flags] -- COMMAND",
-            "Run a remote project command",
+            "Advanced remote command execution",
           ],
           [
             "outpost mirror sessions list|status|attach|kill",
             "Manage detached sessions",
           ],
         ],
-        "Use --sync to force a sync before mirror run. Use --no-sync to skip entirely. Rsync mode requires SSH key auth and rsync on both sides.",
+        "The project-first workflow covers everyday use; mirror is available for advanced sync and detached work.",
       ],
       [
         "Clusters and machines",
@@ -688,6 +615,7 @@ const groups = [
             "Manage team access",
           ],
           ["outpost capacity|status|top|disk", "Inspect health and resources"],
+          ["outpost cleanup", "Clean managed project artifacts and logs"],
           [
             "outpost prune [volumes|clusters|machines]",
             "Preview or reclaim resources",
@@ -1169,8 +1097,8 @@ function Capabilities() {
     ],
     [
       "⟳",
-      "Remote mirror",
-      "Sync your repo, watch for changes, run commands remotely, and keep detached sessions alive.",
+      "Managed remote environments",
+      "Create a project container, sync with rsync, run commands remotely, and keep detached sessions alive.",
     ],
     [
       "♧",

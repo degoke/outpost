@@ -20,6 +20,13 @@ type ResolveOptions struct {
 func ResolvePortMappings(ctx context.Context, exec transport.Executor, cwd string, proj *config.Project, composeArgs string, opts ResolveOptions) ([]PortMapping, error) {
 	var mappings []PortMapping
 	var composeErr error
+	if proj.EnvironmentEnabled() && proj.Environment != nil {
+		for _, port := range proj.Environment.Ports {
+			if port > 0 {
+				mappings = append(mappings, PortMapping{Service: "development", HostPort: port, TargetPort: port, BindHost: "127.0.0.1"})
+			}
+		}
+	}
 
 	if opts.Discover {
 		if exec == nil {
@@ -31,7 +38,9 @@ func ResolvePortMappings(ctx context.Context, exec transport.Executor, cwd strin
 		}
 		mappings = remote
 	} else {
-		mappings, composeErr = ParseComposePorts(cwd, proj, opts.Service)
+		composeMappings, err := ParseComposePorts(cwd, proj, opts.Service)
+		composeErr = err
+		mappings = MergePortMappings(mappings, composeMappings)
 	}
 
 	for _, spec := range opts.ManualSpecs {

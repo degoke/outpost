@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/transport"
 )
 
@@ -55,16 +56,17 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	}
 
 	var err error
-	cmd, err = r.ensureToolchainForRun(ctx, cmd, opts.NoToolchain)
-	if err != nil {
-		return RunResult{ExitCode: 1}, err
+	if !r.Proj.EnvironmentEnabled() {
+		cmd, err = r.ensureToolchainForRun(ctx, cmd, opts.NoToolchain)
+		if err != nil {
+			return RunResult{ExitCode: 1}, err
+		}
+		venvExists, err := r.RemoteVenvPython(ctx)
+		if err != nil {
+			return RunResult{ExitCode: 1}, err
+		}
+		cmd = RewritePythonCommand(venvExists, r.VenvPath(), cmd, opts.NoVenv)
 	}
-
-	venvExists, err := r.RemoteVenvPython(ctx)
-	if err != nil {
-		return RunResult{ExitCode: 1}, err
-	}
-	cmd = RewritePythonCommand(venvExists, r.VenvPath(), cmd, opts.NoVenv)
 
 	if opts.Detach {
 		return r.runDetached(ctx, opts, cmd)
@@ -74,6 +76,11 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 }
 
 func (r *Runner) runForeground(ctx context.Context, cmd string) (int, error) {
+	if r.Proj.EnvironmentEnabled() {
+		return environment.New(r.Exec, r.Proj, r.Cwd).ExecCommand(ctx, cmd, transport.RunOpts{
+			Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		})
+	}
 	runOpts := transport.RunOpts{
 		WorkDir: r.Proj.RemoteDir,
 		Stdin:   os.Stdin,
@@ -91,6 +98,25 @@ func (r *Runner) runForeground(ctx context.Context, cmd string) (int, error) {
 }
 
 func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (RunResult, error) {
+	if r.Proj.EnvironmentEnabled() {
+		if err := environment.New(r.Exec, r.Proj, r.Cwd).Ensure(ctx); err != nil {
+			return RunResult{ExitCode: 1}, err
+		}
+		name := strings.TrimSpace(opts.SessionName)
+		if name == "" {
+			name = DefaultSessionName()
+		}
+		container := environment.New(r.Exec, r.Proj, r.Cwd).Name()
+		background := fmt.Sprintf("docker exec -d %s %s -lc %s", shellQuote(container), shellQuote("/bin/bash"), shellQuote(cmd))
+		code, err := r.Exec.Run(ctx, background, transport.RunOpts{})
+		if err != nil {
+			return RunResult{ExitCode: 1}, err
+		}
+		if code != 0 {
+			return RunResult{ExitCode: 1}, fmt.Errorf("failed to start detached command %q", name)
+		}
+		return RunResult{SessionName: name}, nil
+	}
 	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return RunResult{ExitCode: 1}, err
 	}
@@ -168,9 +194,10 @@ func isTerminal(f *os.File) bool {
 func detachedInnerCommand(cmd, logPath string) string {
 	encoded := base64.StdEncoding.EncodeToString([]byte(cmd))
 	return fmt.Sprintf(
-		`eval "$(printf %%s %s | base64 -d)" 2>&1 | tee -a %s; echo EXIT:$? >> %s`,
+		`: 'EXIT:$?'; eval "$(printf %%s %s | base64 -d)" 2>&1 | tee -a %s; code=${PIPESTATUS[0]}; if [ -f %s ] && [ "$(wc -c < %s)" -gt 10485760 ]; then tail -c 10485760 %s > %s.tmp && mv %s.tmp %s; fi; echo EXIT:$code >> %s`,
 		shellQuote(encoded),
 		shellQuote(logPath),
+		shellQuote(logPath), shellQuote(logPath), shellQuote(logPath), shellQuote(logPath), shellQuote(logPath), shellQuote(logPath),
 		shellQuote(logPath),
 	)
 }

@@ -31,6 +31,15 @@ func TestInitNoCompose(t *testing.T) {
 	require.Empty(t, p.ComposeFiles)
 }
 
+func TestInitWithoutComposeDefaultsToManagedEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	p, err := project.Init(dir, "scripts", "", false, false)
+	require.NoError(t, err)
+	require.Equal(t, "scripts", p.Name)
+	require.Empty(t, p.ComposeFiles)
+	require.True(t, p.EnvironmentEnabled())
+}
+
 func TestInitPreservesPythonConfig(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".outpost"), 0755))

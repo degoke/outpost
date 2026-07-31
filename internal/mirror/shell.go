@@ -6,10 +6,25 @@ import (
 	"os"
 	"strings"
 
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/transport"
 )
 
 func (r *Runner) Shell(ctx context.Context) error {
+	if r.Proj.EnvironmentEnabled() {
+		if _, err := r.syncIfNeeded(ctx, false); err != nil {
+			return err
+		}
+		stopWatch, watchDone := r.startBackgroundWatch(ctx)
+		defer stopWatch()
+		err := environment.New(r.Exec, r.Proj, r.Cwd).Shell(ctx, transport.RunOpts{
+			Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		})
+		if watchErr := <-watchDone; err == nil && watchErr != nil {
+			return watchErr
+		}
+		return err
+	}
 	if err := transport.EnsureRemoteDir(r.Exec, r.Proj.RemoteDir); err != nil {
 		return err
 	}
@@ -55,9 +70,27 @@ func (r *Runner) Shell(ctx context.Context) error {
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
 	}
+	stopWatch, watchDone := r.startBackgroundWatch(ctx)
+	defer stopWatch()
 	err = r.Exec.RunInteractive(ctx, cmd, opts)
+	watchErr := <-watchDone
 	if exitErr, ok := err.(*transport.ExitError); ok {
 		os.Exit(exitErr.Code)
 	}
+	if err == nil && watchErr != nil {
+		return watchErr
+	}
 	return err
+}
+
+// startBackgroundWatch keeps the remote workspace synchronized while an
+// interactive project shell is open. The initial sync has already happened
+// before the shell starts, so the watcher only handles subsequent changes.
+func (r *Runner) startBackgroundWatch(ctx context.Context) (func(), <-chan error) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Watch(watchCtx, WatchOptions{SkipInitialSync: true})
+	}()
+	return func() { cancel() }, done
 }

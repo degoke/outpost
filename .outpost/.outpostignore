@@ -1,0 +1,6 @@
+# Outpost mirror sync ignore rules (same syntax as .gitignore).
+
+node_modules/
+.venv/
+dist/
+*.log

@@ -21,6 +21,27 @@ type SFTPSession struct {
 	createdDirs map[string]bool
 }
 
+// ListFiles returns regular files below root, relative to root.
+func (s *SFTPSession) ListFiles(root string) ([]string, error) {
+	var files []string
+	walker := s.client.Walk(root)
+	for walker.Step() {
+		if err := walker.Err(); err != nil {
+			return nil, err
+		}
+		info := walker.Stat()
+		if info == nil || !info.Mode().IsRegular() {
+			continue
+		}
+		rel, err := filepath.Rel(root, walker.Path())
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, filepath.ToSlash(rel))
+	}
+	return files, nil
+}
+
 // OpenSFTP opens a reusable SFTP session on the SSH connection.
 func (e *SSHExecutor) OpenSFTP() (*SFTPSession, error) {
 	client, err := e.connect()

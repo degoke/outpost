@@ -40,7 +40,6 @@ func syncRepoRsync(cwd string, proj *config.Project, ssh *transport.SSHExecutor,
 
 	args := []string{
 		"-az",
-		"--delete",
 	}
 	for _, pattern := range alwaysIgnore {
 		args = append(args, "--exclude", pattern+"/", "--exclude", pattern)

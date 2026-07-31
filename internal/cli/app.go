@@ -14,12 +14,14 @@ import (
 	"github.com/degoke/outpost/internal/bootstrap"
 	"github.com/degoke/outpost/internal/capabilities"
 	"github.com/degoke/outpost/internal/capacity"
+	"github.com/degoke/outpost/internal/cleanup"
 	"github.com/degoke/outpost/internal/cluster"
 	"github.com/degoke/outpost/internal/compose"
 	"github.com/degoke/outpost/internal/config"
 	"github.com/degoke/outpost/internal/connect"
 	"github.com/degoke/outpost/internal/disk"
 	"github.com/degoke/outpost/internal/docker"
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/host"
 	"github.com/degoke/outpost/internal/machine"
 	"github.com/degoke/outpost/internal/mirror"
@@ -98,6 +100,7 @@ func (app *App) buildRoot() *cobra.Command {
 	root.PersistentFlags().Bool("yes", false, "skip confirmation prompts")
 
 	root.AddCommand(app.hostCmd())
+	root.AddCommand(app.hostUseAliasCmd())
 	root.AddCommand(app.providerCmd())
 	root.AddCommand(app.initCmd())
 	root.AddCommand(app.dockerCmd())
@@ -114,6 +117,15 @@ func (app *App) buildRoot() *cobra.Command {
 	root.AddCommand(app.diskCmd())
 	root.AddCommand(app.pruneCmd())
 	root.AddCommand(app.resetCmd())
+	// Project-first shortcuts. The original grouped commands remain available
+	// for advanced workflows and backwards compatibility.
+	root.AddCommand(app.projectShellCmd())
+	root.AddCommand(app.projectRunCmd())
+	root.AddCommand(app.composeSubCmd("up", true, false))
+	root.AddCommand(app.composeSubCmd("down", false, true))
+	root.AddCommand(app.composeSubCmd("logs", false, false))
+	root.AddCommand(app.projectOpenCmd())
+	root.AddCommand(app.cleanupCmd())
 
 	return root
 }
@@ -199,6 +211,11 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
 		return err
 	}
+	cleanupOpts := cleanup.OptionsForProject(proj)
+	cleanupOpts.IncludeDockerCache = false
+	if err := cleanup.Project(ctx, exec, proj, cleanupOpts); err != nil {
+		return err
+	}
 	return run(ctx, exec, h, proj)
 }
 
@@ -225,7 +242,7 @@ func (app *App) hostCreateCmd() *cobra.Command {
 	var noCleanup bool
 	cmd := &cobra.Command{
 		Use:   "create NAME",
-		Short: "Provision a new cloud host",
+		Short: "Provision a new cloud host with at least 20 GiB root storage",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, _ := app.Global.ResolveHost(app.HostFlag)
@@ -431,6 +448,12 @@ func (app *App) hostUseCmd() *cobra.Command {
 	}
 }
 
+func (app *App) hostUseAliasCmd() *cobra.Command {
+	cmd := app.hostUseCmd()
+	cmd.Use = "use NAME"
+	return cmd
+}
+
 func (app *App) hostVerifyCmd() *cobra.Command {
 	var skipBootstrap bool
 	cmd := &cobra.Command{
@@ -479,7 +502,8 @@ func (app *App) hostDestroyCmd() *cobra.Command {
 
 func (app *App) initCmd() *cobra.Command {
 	var name, hostName string
-	var writeGitignore, noCompose bool
+	var writeGitignore, noCompose, noShell bool
+	openShell := true
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize Outpost for the current repository",
@@ -498,14 +522,92 @@ func (app *App) initCmd() *cobra.Command {
 			if !writeGitignore {
 				app.Out.Info("Tip: run with --write-gitignore to keep .outpost/ out of git (local-only config)")
 			}
+			if openShell && !noShell && !app.Out.JSON && isInteractiveTerminal() {
+				return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+					return mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Shell(ctx)
+				})
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "stable project name")
 	cmd.Flags().StringVar(&hostName, "host", "", "host override")
 	cmd.Flags().BoolVar(&writeGitignore, "write-gitignore", false, "append .outpost/ to .gitignore")
-	cmd.Flags().BoolVar(&noCompose, "no-compose", false, "initialize without a compose file (mirror-only projects)")
+	cmd.Flags().BoolVar(&noCompose, "no-compose", false, "explicitly initialize without Compose (Compose is optional)")
+	cmd.Flags().BoolVar(&noShell, "no-shell", false, "initialize without opening the remote project shell")
 	return cmd
+}
+
+func isInteractiveTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func (app *App) projectShellCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell",
+		Short: "Open the remote project development environment",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				return mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Shell(ctx)
+			})
+		},
+	}
+}
+
+func (app *App) projectRunCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:                "run -- COMMAND [ARGS...]",
+		Short:              "Run a command in the remote project environment",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("command is required")
+			}
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{Command: strings.Join(args, " ")})
+				if err != nil {
+					return err
+				}
+				if result.ExitCode != 0 {
+					os.Exit(result.ExitCode)
+				}
+				return nil
+			})
+		},
+	}
+}
+
+func (app *App) projectOpenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "open",
+		Short: "Forward and display project ports",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.connectStart(connectStartOpts{discover: true})
+		},
+	}
+}
+
+func (app *App) cleanupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cleanup",
+		Short: "Remove stale Outpost project and Docker artifacts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				if err := cleanup.Project(ctx, exec, proj, cleanup.OptionsForProject(proj)); err != nil {
+					return err
+				}
+				if err := cleanup.Global(ctx, exec, cleanup.OptionsForProject(proj)); err != nil {
+					return err
+				}
+				app.Out.Success("Outpost cleanup completed")
+				return nil
+			})
+		},
+	}
 }
 
 func (app *App) dockerCmd() *cobra.Command {
@@ -537,8 +639,9 @@ func (app *App) dockerCmd() *cobra.Command {
 
 func (app *App) composeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "compose",
-		Short: "Run docker compose on the remote host",
+		Use:        "compose",
+		Short:      "Advanced direct Docker Compose access on the remote host",
+		Deprecated: "use `outpost up`, `outpost down`, `outpost logs`, `outpost status`, or `outpost compose exec` for service shells",
 	}
 	cmd.AddCommand(app.composeSubCmd("up", true, false))
 	cmd.AddCommand(app.composeSubCmd("down", false, true))
@@ -689,8 +792,9 @@ func (app *App) connectCmd() *cobra.Command {
 	var localPort int
 	var portSpecs []string
 	cmd := &cobra.Command{
-		Use:   "connect",
-		Short: "Forward Compose service ports to localhost",
+		Use:        "connect",
+		Short:      "Forward Compose service ports to localhost",
+		Deprecated: "use `outpost open` instead",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if status {
 				return app.connectStatus()
@@ -749,7 +853,7 @@ func (app *App) connectStart(opts connectStartOpts) error {
 
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 		if len(opts.portSpecs) == 0 {
-			if err := proj.RequireCompose(); err != nil {
+			if err := proj.RequireCompose(); err != nil && !(proj.EnvironmentEnabled() && proj.Environment != nil && len(proj.Environment.Ports) > 0) {
 				return err
 			}
 		}
@@ -840,8 +944,9 @@ func (app *App) connectDown() error {
 
 func (app *App) mirrorCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "mirror",
-		Short: "Sync and run commands remotely in the project directory",
+		Use:        "mirror",
+		Short:      "Advanced sync and remote execution commands",
+		Deprecated: "use the project-first commands instead (`outpost shell`, `outpost run`, `outpost up`)",
 	}
 	cmd.AddCommand(app.mirrorSyncCmd())
 	cmd.AddCommand(app.mirrorWatchCmd())
@@ -855,15 +960,17 @@ func (app *App) mirrorCmd() *cobra.Command {
 }
 
 func (app *App) mirrorSyncCmd() *cobra.Command {
-	var useRsync bool
+	var useRsync, forceSFTP bool
 	var workers int
 	cmd := &cobra.Command{
-		Use:   "sync",
-		Short: "Sync the repository to the remote project directory",
+		Use:        "sync",
+		Short:      "Sync the repository to the remote project directory",
+		Deprecated: "sync is handled automatically by `outpost shell` and `outpost up`",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				runner.SyncUseRsync = useRsync
+				runner.SyncForceSFTP = forceSFTP
 				runner.SyncWorkers = workers
 				if err := runner.SyncExplicit(ctx); err != nil {
 					return err
@@ -874,17 +981,19 @@ func (app *App) mirrorSyncCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for faster incremental sync (requires rsync locally and on the remote)")
+	cmd.Flags().BoolVar(&forceSFTP, "sftp", false, "Force the SFTP fallback transport")
 	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
 	return cmd
 }
 
 func (app *App) mirrorWatchCmd() *cobra.Command {
-	var useRsync bool
+	var useRsync, forceSFTP bool
 	var workers int
 	var debounce time.Duration
 	cmd := &cobra.Command{
-		Use:   "watch",
-		Short: "Continuously sync repository changes to the remote",
+		Use:        "watch",
+		Short:      "Continuously sync repository changes to the remote",
+		Deprecated: "file watching happens automatically during `outpost shell` sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
@@ -892,8 +1001,9 @@ func (app *App) mirrorWatchCmd() *cobra.Command {
 				defer cancel()
 				return runner.Watch(watchCtx, mirror.WatchOptions{
 					SyncOptions: mirror.SyncOptions{
-						UseRsync: useRsync,
-						Workers:  workers,
+						UseRsync:  useRsync,
+						ForceSFTP: forceSFTP,
+						Workers:   workers,
 					},
 					Debounce: debounce,
 				})
@@ -901,23 +1011,21 @@ func (app *App) mirrorWatchCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for each sync (requires rsync locally and on the remote)")
+	cmd.Flags().BoolVar(&forceSFTP, "sftp", false, "Force the SFTP fallback transport")
 	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
-	cmd.Flags().DurationVar(&debounce, "debounce", 300*time.Millisecond, "Debounce interval before syncing changes")
+	cmd.Flags().DurationVar(&debounce, "debounce", time.Second, "Debounce interval before syncing changes")
 	return cmd
 }
 
 func (app *App) mirrorSetupPythonCmd() *cobra.Command {
 	var pythonBin, requirements string
-	var useRsync bool
-	var workers int
 	cmd := &cobra.Command{
-		Use:   "setup-python",
-		Short: "Create a remote Python virtual environment and install requirements",
+		Use:        "setup-python",
+		Short:      "Create a remote Python virtual environment and install requirements",
+		Deprecated: "Python setup is handled automatically by `outpost run` in the managed environment",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				runner.SyncUseRsync = useRsync
-				runner.SyncWorkers = workers
 				if err := runner.SetupPython(ctx, mirror.SetupPythonOptions{
 					Python:       pythonBin,
 					Requirements: requirements,
@@ -931,8 +1039,6 @@ func (app *App) mirrorSetupPythonCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&pythonBin, "python", "python3", "Python interpreter for creating the venv")
 	cmd.Flags().StringVar(&requirements, "requirements", "", "requirements file (default from project.yaml or requirements.txt)")
-	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for repository sync (requires rsync locally and on the remote)")
-	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
 	return cmd
 }
 
@@ -940,8 +1046,9 @@ func (app *App) mirrorSetupToolchainCmd() *cobra.Command {
 	var useRsync bool
 	var workers int
 	cmd := &cobra.Command{
-		Use:   "setup-toolchain",
-		Short: "Install project toolchain packages and runtimes on the remote host",
+		Use:        "setup-toolchain",
+		Short:      "Install project toolchain packages and runtimes on the remote host",
+		Deprecated: "toolchain installation is automatic in `outpost run` within the managed environment",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
@@ -970,8 +1077,9 @@ func (app *App) mirrorSetupToolchainCmd() *cobra.Command {
 
 func (app *App) mirrorToolchainCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "toolchain",
-		Short: "Inspect project toolchain requirements",
+		Use:        "toolchain",
+		Short:      "Inspect project toolchain requirements",
+		Deprecated: "toolchain detection is automatic in `outpost run` within the managed environment",
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "plan",
@@ -1016,11 +1124,12 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 	var forceSync bool
 	var noVenv bool
 	var noToolchain bool
-	var useRsync bool
+	var useRsync, forceSFTP bool
 	var workers int
 	cmd := &cobra.Command{
 		Use:                "run [flags] -- COMMAND [ARGS...]",
 		Short:              "Run a command in the remote project directory",
+		Deprecated:         "use `outpost run -- COMMAND` instead",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rest := args
@@ -1055,6 +1164,8 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 					noToolchain = true
 				case "--rsync":
 					useRsync = true
+				case "--sftp":
+					forceSFTP = true
 				case "--workers":
 					if len(rest) < 2 {
 						return fmt.Errorf("--workers requires a value")
@@ -1078,6 +1189,7 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
 				runner.SyncUseRsync = useRsync
+				runner.SyncForceSFTP = forceSFTP
 				if workers > 0 {
 					runner.SyncWorkers = workers
 				}
@@ -1109,8 +1221,9 @@ func (app *App) mirrorRunCmd() *cobra.Command {
 
 func (app *App) mirrorShellCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "shell",
-		Short: "Open an interactive shell in the remote project directory",
+		Use:        "shell",
+		Short:      "Open an interactive shell in the remote project directory",
+		Deprecated: "use `outpost shell` instead",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
@@ -1447,6 +1560,13 @@ func (app *App) statusCmd() *cobra.Command {
 						report.Docker.ContainersRun, report.Docker.ContainersStop)
 				} else {
 					app.Out.Info("Docker: unavailable")
+				}
+				if proj, err := config.LoadProject(app.Cwd); err == nil && proj.EnvironmentEnabled() {
+					state, _ := environment.New(exec, proj, app.Cwd).Status(ctx)
+					if state == "" {
+						state = "not created"
+					}
+					app.Out.Info("Project container %s: %s", proj.Name, state)
 				}
 				for _, p := range report.Compose {
 					app.Out.Info("Compose project %s: %s", p.Name, p.Status)
@@ -2049,6 +2169,12 @@ func (app *App) diskCmd() *cobra.Command {
 					app.Out.Info("Docker %s: %s (reclaimable %s)", row.Type, row.Size, row.Reclaimable)
 				}
 				app.Out.Info("Outpost projects: %s", formatBytes(report.Outpost.ProjectsBytes))
+				if report.Outpost.ToolchainsBytes > 0 {
+					app.Out.Info("Outpost toolchains: %s", formatBytes(report.Outpost.ToolchainsBytes))
+				}
+				if report.Outpost.ClustersBytes > 0 {
+					app.Out.Info("Outpost clusters: %s", formatBytes(report.Outpost.ClustersBytes))
+				}
 				if report.Outpost.MachinesBytes > 0 {
 					app.Out.Info("Outpost machines: %s", formatBytes(report.Outpost.MachinesBytes))
 				}

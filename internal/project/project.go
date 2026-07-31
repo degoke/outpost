@@ -44,11 +44,12 @@ func DeriveName(cwd, explicit string) string {
 func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Project, error) {
 	var composeFiles []string
 	if !noCompose {
-		composeFile, err := DetectComposeFile(cwd)
-		if err != nil {
-			return nil, err
+		// Compose is optional for the project-first workflow. A managed
+		// development container can be created from .devcontainer/, a
+		// language manifest, or the default project image without a stack.
+		if composeFile, err := DetectComposeFile(cwd); err == nil {
+			composeFiles = []string{composeFile}
 		}
-		composeFiles = []string{composeFile}
 	}
 	projectName := DeriveName(cwd, name)
 
@@ -66,6 +67,7 @@ func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Proje
 		Host:         host,
 		RemoteDir:    filepath.Join(config.DefaultRemoteBase, "projects", projectName),
 		ComposeFiles: composeFiles,
+		Environment:  &config.ProjectEnvironment{},
 	}
 
 	if existing != nil {
@@ -76,6 +78,9 @@ func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Proje
 		p.RemoteDir = existing.RemoteDir
 		p.ExtraFiles = existing.ExtraFiles
 		p.Python = existing.Python
+		p.Toolchain = existing.Toolchain
+		p.Environment = existing.Environment
+		p.Cleanup = existing.Cleanup
 		if host == "" {
 			p.Host = existing.Host
 		}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/degoke/outpost/internal/upload"
 )
@@ -79,6 +80,40 @@ func (r *Runner) SetupPython(ctx context.Context, opts SetupPythonOptions) error
 		requirements = r.RequirementsPath()
 	}
 	venv := r.VenvPath()
+	if r.Proj.EnvironmentEnabled() {
+		manager := environment.New(r.Exec, r.Proj, r.Cwd)
+		if err := manager.Ensure(ctx); err != nil {
+			return err
+		}
+		check := fmt.Sprintf("test -x %s/bin/python", shellQuote(venv))
+		code, err := manager.ExecCommand(ctx, check, transport.RunOpts{})
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			code, err = manager.ExecCommand(ctx, fmt.Sprintf("%s -m venv %s", shellQuote(python), shellQuote(venv)), transport.RunOpts{})
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				return fmt.Errorf("failed to create Python environment inside the development container")
+			}
+		}
+		if _, err := os.Stat(filepath.Join(r.Cwd, requirements)); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		code, err = manager.ExecCommand(ctx, fmt.Sprintf("%s/bin/pip install -r %s", shellQuote(venv), shellQuote(requirements)), transport.RunOpts{Stdout: os.Stdout, Stderr: os.Stderr})
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			return fmt.Errorf("pip install failed inside the development container (exit %d)", code)
+		}
+		return nil
+	}
 
 	exists, err := r.RemoteVenvPython(ctx)
 	if err != nil {

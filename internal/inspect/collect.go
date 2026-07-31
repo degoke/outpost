@@ -236,7 +236,7 @@ func ListIncusInstanceStats(ctx context.Context, exec transport.Executor) ([]Con
 func CollectOutpostDirs(ctx context.Context, exec transport.Executor) (OutpostDirs, error) {
 	var d OutpostDirs
 	var out bytes.Buffer
-	cmd := fmt.Sprintf("du -sb %s/projects %s/share %s/machines 2>/dev/null || true", config.DefaultRemoteBase, config.DefaultRemoteBase, config.DefaultRemoteBase)
+	cmd := fmt.Sprintf("du -sb %s/projects %s/share %s/machines %s/toolchains %s/clusters 2>/dev/null || true", config.DefaultRemoteBase, config.DefaultRemoteBase, config.DefaultRemoteBase, config.DefaultRemoteBase, config.DefaultRemoteBase)
 	code, err := exec.Run(ctx, cmd, transport.RunOpts{Stdout: &out})
 	if err != nil || code != 0 {
 		return d, nil
@@ -252,6 +252,10 @@ func CollectOutpostDirs(ctx context.Context, exec transport.Executor) (OutpostDi
 			d.ShareBytes = v
 		} else if strings.Contains(line, "/machines") {
 			d.MachinesBytes = v
+		} else if strings.Contains(line, "/toolchains") {
+			d.ToolchainsBytes = v
+		} else if strings.Contains(line, "/clusters") {
+			d.ClustersBytes = v
 		}
 	}
 	return d, nil

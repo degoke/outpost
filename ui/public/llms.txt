@@ -20,15 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 
 - `outpost host add` — register an existing Linux host over SSH
 - `outpost host create` — provision a host on AWS
-- `outpost init` — initialize a project on the active host
-- `outpost compose up` — run Docker Compose remotely
-- `outpost connect` — forward remote services to localhost
+- `outpost init` — create the project environment, sync it, and open a shell (`--no-shell` for scripts)
+- `outpost shell` — open a shell in the managed project container
+- `outpost run -- COMMAND` — run a command in that container
+- `outpost up`, `outpost down`, `outpost logs`, `outpost status` — manage the project
+- `outpost open` — forward and display project ports
+- `outpost cleanup` — remove stale Outpost-owned project artifacts
 - `outpost cluster create` — create a Kubernetes cluster on the host (`--driver kind` or `k3d`, default kind)
 - `outpost machine create` — launch Incus containers or VMs
-- `outpost mirror sync` — sync a repository to the host (SFTP with parallel uploads, or `--rsync`)
-- `outpost mirror watch` — continuously sync file changes while you edit locally
-- `outpost mirror run` — run commands in the mirrored project directory
-- `outpost mirror setup-toolchain` — install detected build tools (make, Go, etc.) on the remote host
 - `outpost invite create` — share host access with teammates
 
 ## Configuration
@@ -36,11 +35,14 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 Outpost uses two `.outpost` locations:
 
 - `~/.outpost/` — global CLI config on your machine (hosts, SSH keys, sessions). Not in your git repo.
-- `.outpost/` — per-repository project folder created by `outpost init` (`project.yaml`, `.outpostignore`). Never synced to the remote host. Usually committed so teammates share the same project name.
+- `.outpost/` — per-repository project folder created by `outpost init` (`project.yaml`, `.outpostignore`). Never synced to the remote host. Usually committed so teammates share the same project name and environment settings.
 
 ## Product facts
 
 - Connects over SSH; no permanent Outpost agent on the server
+- Creates one managed remote development container per project
+- Reads `.devcontainer/devcontainer.json` for image, workspace, ports, environment, mounts, and build settings
+- Cleans managed artifacts and retained logs according to project cleanup settings
 - Supports existing hosts or AWS-provisioned EC2 instances
 - macOS and Linux CLI
 - Open source: https://github.com/degoke/outpost

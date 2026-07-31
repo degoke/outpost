@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/output"
 	"github.com/degoke/outpost/internal/transport"
 	"github.com/degoke/outpost/internal/upload"
@@ -26,7 +28,11 @@ func (r *Runner) BuildCommand(subcommand string, args []string) string {
 }
 
 func (r *Runner) buildCmd(subcommand string, args []string) string {
-	files := upload.RemoteComposeArgs(r.Project)
+	base := r.Project.RemoteDir
+	files := ""
+	for _, f := range upload.AllComposeFiles(r.Project) {
+		files += " -f " + base + "/" + filepath.Base(f)
+	}
 	return fmt.Sprintf("docker compose -p %s %s %s %s",
 		shellQuote(r.Project.Name),
 		files,
@@ -66,6 +72,11 @@ func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uplo
 	}
 	if uploadFirst {
 		if err := r.syncProjectIfNeeded(); err != nil {
+			return 1, err
+		}
+	}
+	if r.Project.EnvironmentEnabled() && subcommand != "down" {
+		if err := environment.New(r.Exec, r.Project, r.Cwd).Ensure(ctx); err != nil {
 			return 1, err
 		}
 	}

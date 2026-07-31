@@ -15,6 +15,7 @@ import (
 
 const (
 	defaultInstanceType = "t3.medium"
+	minimumRootVolumeGB = 20
 	sshWaitTimeout      = 5 * time.Minute
 
 	ubuntuOwnerID = "099720109477"
@@ -61,10 +62,18 @@ func (p *Provisioner) Create(ctx context.Context, opts provider.CreateOpts) (*pr
 
 	userData := cloudInitUserData(opts.SSHPublicKey)
 	runInput := &ec2.RunInstancesInput{
-		ImageId:          aws.String(ami),
-		InstanceType:     ec2types.InstanceType(opts.InstanceType),
-		MinCount:         aws.Int32(1),
-		MaxCount:         aws.Int32(1),
+		ImageId:      aws.String(ami),
+		InstanceType: ec2types.InstanceType(opts.InstanceType),
+		MinCount:     aws.Int32(1),
+		MaxCount:     aws.Int32(1),
+		BlockDeviceMappings: []ec2types.BlockDeviceMapping{{
+			DeviceName: aws.String("/dev/sda1"),
+			Ebs: &ec2types.EbsBlockDevice{
+				DeleteOnTermination: aws.Bool(true),
+				VolumeSize:          aws.Int32(minimumRootVolumeGB),
+				VolumeType:          ec2types.VolumeTypeGp3,
+			},
+		}},
 		UserData:         aws.String(userData),
 		SecurityGroupIds: []string{sgID},
 		TagSpecifications: []ec2types.TagSpecification{

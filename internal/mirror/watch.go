@@ -15,14 +15,18 @@ import (
 )
 
 type SyncOptions struct {
-	UseRsync bool
-	Workers  int
+	UseRsync  bool
+	ForceSFTP bool
+	Workers   int
 }
 
 type WatchOptions struct {
 	SyncOptions
-	Debounce time.Duration
+	Debounce        time.Duration
+	SkipInitialSync bool
 }
+
+const defaultWatchDebounce = time.Second
 
 func (r *Runner) syncOptsFrom(opts SyncOptions) *upload.SyncOpts {
 	base := r.syncOpts()
@@ -31,6 +35,7 @@ func (r *Runner) syncOptsFrom(opts SyncOptions) *upload.SyncOpts {
 		*out = *base
 	}
 	out.UseRsync = opts.UseRsync
+	out.ForceSFTP = opts.ForceSFTP
 	if opts.Workers > 0 {
 		out.Workers = opts.Workers
 	}
@@ -50,20 +55,22 @@ func (r *Runner) Watch(ctx context.Context, opts WatchOptions) error {
 
 	debounce := opts.Debounce
 	if debounce <= 0 {
-		debounce = 300 * time.Millisecond
+		debounce = defaultWatchDebounce
 	}
 	syncOpts := r.syncOptsFrom(opts.SyncOptions)
 
-	if r.Out != nil {
-		r.Out.Step("Performing initial sync...")
+	if !opts.SkipInitialSync {
+		if r.Out != nil {
+			r.Out.Step("Performing initial sync...")
+		}
+		if err := upload.SyncRepo(r.Cwd, r.Proj, r.Exec, syncOpts); err != nil {
+			return err
+		}
+		if err := r.recordSynced(); err != nil {
+			return err
+		}
 	}
-	if err := upload.SyncRepo(r.Cwd, r.Proj, r.Exec, syncOpts); err != nil {
-		return err
-	}
-	if err := r.recordSynced(); err != nil {
-		return err
-	}
-	if opts.UseRsync {
+	if opts.UseRsync || !opts.ForceSFTP {
 		if r.Out != nil {
 			r.Out.Success("Watching for changes (rsync mode). Press Ctrl+C to stop.")
 		}

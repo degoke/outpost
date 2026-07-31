@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/degoke/outpost/internal/provider"
 	"github.com/degoke/outpost/internal/provider/aws"
 	"github.com/degoke/outpost/internal/provider/aws/stub"
@@ -27,6 +28,12 @@ func TestCreateInstanceWithStub(t *testing.T) {
 	require.NotEmpty(t, result.SecurityGroup)
 	require.Len(t, result.VolumeIDs, 1)
 	require.True(t, ec2.HasSecurityGroup("outpost-host123"))
+	require.Len(t, ec2.LastRunInput.BlockDeviceMappings, 1)
+	root := ec2.LastRunInput.BlockDeviceMappings[0]
+	require.Equal(t, "/dev/sda1", *root.DeviceName)
+	require.Equal(t, int32(20), *root.Ebs.VolumeSize)
+	require.Equal(t, ec2types.VolumeTypeGp3, root.Ebs.VolumeType)
+	require.True(t, *root.Ebs.DeleteOnTermination)
 }
 
 func TestCreateSecurityGroupIdempotent(t *testing.T) {

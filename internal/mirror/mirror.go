@@ -8,13 +8,14 @@ import (
 )
 
 type Runner struct {
-	Exec         transport.Executor
-	Proj         *config.Project
-	Cwd          string
-	Host         string
-	Out          *output.Printer
-	SyncUseRsync bool
-	SyncWorkers  int
+	Exec          transport.Executor
+	Proj          *config.Project
+	Cwd           string
+	Host          string
+	Out           *output.Printer
+	SyncUseRsync  bool
+	SyncForceSFTP bool
+	SyncWorkers   int
 }
 
 func New(exec transport.Executor, proj *config.Project, cwd, host string, out *output.Printer) *Runner {
@@ -32,8 +33,9 @@ func (r *Runner) syncOpts() *upload.SyncOpts {
 		return nil
 	}
 	return &upload.SyncOpts{
-		Out:      r.Out,
-		UseRsync: r.SyncUseRsync,
-		Workers:  r.SyncWorkers,
+		Out:       r.Out,
+		UseRsync:  r.SyncUseRsync,
+		ForceSFTP: r.SyncForceSFTP,
+		Workers:   r.SyncWorkers,
 	}
 }

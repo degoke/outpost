@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/degoke/outpost/internal/config"
+	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/output"
 	"github.com/degoke/outpost/internal/transport"
 )
@@ -384,6 +385,24 @@ func (r *Runner) SetupToolchain(ctx context.Context) (ToolchainPlan, error) {
 	plan, err := DetectPlan(r.Cwd, r.Proj, "")
 	if err != nil {
 		return ToolchainPlan{}, err
+	}
+	if r.Proj.EnvironmentEnabled() {
+		manager := environment.New(r.Exec, r.Proj, r.Cwd)
+		if err := manager.Ensure(ctx); err != nil {
+			return ToolchainPlan{}, err
+		}
+		if len(plan.Packages) > 0 {
+			packages := strings.Join(plan.Packages, " ")
+			install := fmt.Sprintf("if command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq %s; elif command -v apk >/dev/null 2>&1; then apk add --no-cache %s; else echo 'no supported package manager in development image' >&2; exit 1; fi", packages, packages)
+			code, err := manager.ExecCommand(ctx, install, transport.RunOpts{Stdout: os.Stdout, Stderr: os.Stderr})
+			if err != nil {
+				return ToolchainPlan{}, err
+			}
+			if code != 0 {
+				return ToolchainPlan{}, fmt.Errorf("could not install toolchain packages in development container")
+			}
+		}
+		return plan, nil
 	}
 	if _, err := r.ensureToolchainWithCache(ctx, plan, r.Out); err != nil {
 		return ToolchainPlan{}, err

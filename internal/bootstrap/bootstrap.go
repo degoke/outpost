@@ -209,23 +209,53 @@ fi
 
 const kubernetesToolsScript = `
 set -e
-if command -v kubectl >/dev/null 2>&1 && command -v kind >/dev/null 2>&1 && command -v k3d >/dev/null 2>&1; then
-  exit 0
-fi
 need_sudo=""
 if [ "$(id -u)" -ne 0 ]; then need_sudo="sudo"; fi
+if [ -z "$need_sudo" ] && [ "$(id -u)" -ne 0 ]; then
+  echo "OUTPOST_ERROR: root or sudo is required to install Kubernetes tools"
+  exit 1
+fi
+
+install_packages() {
+  packages="$1"
+  if command -v apt-get >/dev/null 2>&1; then
+    $need_sudo apt-get update -qq
+    $need_sudo apt-get install -y -qq $packages
+  elif command -v yum >/dev/null 2>&1; then
+    $need_sudo yum install -y -q $packages
+  else
+    echo "OUTPOST_ERROR: unsupported project-container distribution — install kubectl, kind/k3d, curl, and Docker CLI manually"
+    exit 1
+  fi
+}
+
+if ! command -v curl >/dev/null 2>&1; then
+  install_packages "ca-certificates curl"
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    install_packages "docker.io"
+  else
+    install_packages "docker"
+  fi
+fi
+case "$(uname -m)" in
+  x86_64|amd64) arch="amd64" ;;
+  aarch64|arm64) arch="arm64" ;;
+  *) echo "OUTPOST_ERROR: unsupported project-container architecture $(uname -m)"; exit 1 ;;
+esac
 if ! command -v kubectl >/dev/null 2>&1; then
-  curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" -o /tmp/kubectl
+  curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubectl" -o /tmp/kubectl
   chmod +x /tmp/kubectl
   $need_sudo mv /tmp/kubectl /usr/local/bin/kubectl
 fi
 if ! command -v kind >/dev/null 2>&1; then
-  curl -fsSL https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64 -o /tmp/kind
+  curl -fsSL "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-$arch" -o /tmp/kind
   chmod +x /tmp/kind
   $need_sudo mv /tmp/kind /usr/local/bin/kind
 fi
 if ! command -v k3d >/dev/null 2>&1; then
-  curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64 -o /tmp/k3d
+  curl -fsSL "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-$arch" -o /tmp/k3d
   chmod +x /tmp/k3d
   $need_sudo mv /tmp/k3d /usr/local/bin/k3d
 fi
@@ -240,12 +270,17 @@ func EnsureKubernetesTools(ctx context.Context, exec transport.Executor) error {
 		return nil
 	}
 	var stderr strings.Builder
-	code, err = exec.Run(ctx, kubernetesToolsScript, transport.RunOpts{Stderr: &stderr})
+	var stdout strings.Builder
+	code, err = exec.Run(ctx, kubernetesToolsScript, transport.RunOpts{Stdout: &stdout, Stderr: &stderr})
 	if err != nil {
 		return err
 	}
 	if code != 0 {
-		return fmt.Errorf("kubernetes tools install failed: %s", strings.TrimSpace(stderr.String()))
+		message := strings.TrimSpace(strings.Join([]string{stdout.String(), stderr.String()}, "\n"))
+		if marker := strings.Index(message, "OUTPOST_ERROR:"); marker >= 0 {
+			message = strings.TrimSpace(message[marker+len("OUTPOST_ERROR:"):])
+		}
+		return fmt.Errorf("kubernetes tools install failed: %s", message)
 	}
 	return nil
 }

@@ -86,6 +86,12 @@ hosts:
     port: 22
     role: owner
     host_id: test-host-id
+  staging:
+    hostname: 203.0.113.20
+    user: ubuntu
+    port: 22
+    role: owner
+    host_id: staging-host-id
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(configYAML), 0o600))
 }

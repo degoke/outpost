@@ -49,6 +49,21 @@ func RenderKindConfig(cfg KindConfig) string {
 	b.WriteString("kind: Cluster\n")
 	b.WriteString("apiVersion: kind.x-k8s.io/v1alpha4\n")
 	b.WriteString(fmt.Sprintf("name: %s\n", cfg.Name))
+	// The cluster is created through the remote host Docker socket from inside
+	// the project container. Binding the API port beyond the host loopback lets
+	// the container reach it through host.docker.internal; outpost open still
+	// tunnels the host-local endpoint to the developer's machine.
+	b.WriteString("networking:\n")
+	b.WriteString("  apiServerAddress: 0.0.0.0\n")
+	b.WriteString("kubeadmConfigPatches:\n")
+	b.WriteString("- |\n")
+	b.WriteString("  kind: ClusterConfiguration\n")
+	b.WriteString("  apiServer:\n")
+	b.WriteString("    certSANs:\n")
+	b.WriteString("    - host.docker.internal\n")
+	b.WriteString("    - 127.0.0.1\n")
+	b.WriteString("    - localhost\n")
+	b.WriteString("    - 0.0.0.0\n")
 	b.WriteString("nodes:\n")
 	for i := 0; i < cfg.ControlPlanes; i++ {
 		b.WriteString("- role: control-plane\n")

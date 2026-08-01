@@ -50,7 +50,28 @@ type Service struct {
 	Exec           transport.Executor
 	Out            *output.Printer
 	HostName       string
+	RemoteDirBase  string
+	InstancePrefix string
 	cachedIncusCLI string
+}
+
+func (s *Service) machineRemoteBase() string {
+	if s.RemoteDirBase != "" {
+		return strings.TrimRight(s.RemoteDirBase, "/")
+	}
+	return remoteBase
+}
+
+func (s *Service) machineRemoteDir(name string) string {
+	return s.machineRemoteBase() + "/" + config.SanitizeMachineName(name)
+}
+
+func (s *Service) machineIncusName(name string) string {
+	prefix := "outpost-"
+	if s.InstancePrefix != "" {
+		prefix = s.InstancePrefix
+	}
+	return prefix + config.SanitizeMachineName(name)
 }
 
 type incusListEntry struct {
@@ -106,8 +127,8 @@ func (s *Service) Create(ctx context.Context, name string, opts CreateOptions, p
 		}
 	}
 
-	incusName := IncusName(name)
-	remoteDir := RemoteDir(name)
+	incusName := s.machineIncusName(name)
+	remoteDir := s.machineRemoteDir(name)
 	if err := transport.EnsureRemoteDir(s.Exec, remoteDir); err != nil {
 		return err
 	}
@@ -401,14 +422,14 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 		s.Out.Step("Deleting machine %q...", name)
 	}
 	meta, err := s.loadMeta(ctx, safe)
-	incusName := IncusName(name)
+	incusName := s.machineIncusName(name)
 	if err == nil {
 		incusName = meta.IncusName
 	}
 	if err := s.deleteIncusInstance(ctx, incusName); err != nil {
 		return err
 	}
-	remoteDir := RemoteDir(name)
+	remoteDir := s.machineRemoteDir(name)
 	_, _ = s.Exec.Run(ctx, fmt.Sprintf("rm -rf %s", shellQuote(remoteDir)), transport.RunOpts{})
 	return nil
 }
@@ -484,7 +505,8 @@ func (s *Service) listRuntime(ctx context.Context) (map[string]runtimeInfo, erro
 }
 
 func (s *Service) listMeta(ctx context.Context) ([]Meta, error) {
-	out, err := inspect.RunOutput(ctx, s.Exec, fmt.Sprintf("ls -1 %s 2>/dev/null || true", shellQuote(remoteBase)))
+	base := s.machineRemoteBase()
+	out, err := inspect.RunOutput(ctx, s.Exec, fmt.Sprintf("ls -1 %s 2>/dev/null || true", shellQuote(base)))
 	if err != nil {
 		return nil, err
 	}
@@ -494,7 +516,7 @@ func (s *Service) listMeta(ctx context.Context) ([]Meta, error) {
 		if dir == "" {
 			continue
 		}
-		data, err := s.Exec.Download(remoteBase + "/" + dir + "/meta.yaml")
+		data, err := s.Exec.Download(base + "/" + dir + "/meta.yaml")
 		if err != nil {
 			continue
 		}
@@ -507,7 +529,7 @@ func (s *Service) listMeta(ctx context.Context) ([]Meta, error) {
 }
 
 func (s *Service) loadMeta(ctx context.Context, safeName string) (*Meta, error) {
-	data, err := s.Exec.Download(remoteBase + "/" + safeName + "/meta.yaml")
+	data, err := s.Exec.Download(s.machineRemoteDir(safeName) + "/meta.yaml")
 	if err != nil {
 		return nil, err
 	}
@@ -525,7 +547,7 @@ func (s *Service) resolveIncusName(ctx context.Context, name string) (string, er
 		return meta.IncusName, nil
 	}
 	runtime, _ := s.listRuntime(ctx)
-	incusName := IncusName(name)
+	incusName := s.machineIncusName(name)
 	if _, ok := runtime[incusName]; ok {
 		return incusName, nil
 	}

@@ -1,0 +1,42 @@
+{
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "pages": ["index", "getting-started", "projects"]
+    },
+    {
+      "id": "commands",
+      "title": "Commands",
+      "pages": [
+        "commands/init",
+        "commands/shell",
+        "commands/ai",
+        "commands/run",
+        "commands/open",
+        "commands/close",
+        "commands/migrate",
+        "commands/cleanup",
+        "commands/compose",
+        "commands/cluster",
+        "commands/machine",
+        "commands/app",
+        "commands/docker",
+        "commands/host",
+        "commands/invite",
+        "commands/monitoring",
+        "commands/configuration"
+      ]
+    },
+    {
+      "id": "guides",
+      "title": "Guides",
+      "pages": [
+        "guides/sharing",
+        "guides/migration",
+        "guides/kubernetes",
+        "guides/aws-hosts"
+      ]
+    }
+  ]
+}

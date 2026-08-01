@@ -7,8 +7,9 @@ Outpost turns a remote Linux host into a shared development environment you cont
 ## Primary pages
 
 - [Home](/): Product overview, install command, capabilities, and workflow
-- [Usage guide](/#usage): Complete CLI reference for hosts, projects, clusters, machines, connections, and teams
+- [Documentation](/#docs): Markdown docs for commands, guides, and configuration
 - [GitHub repository](https://github.com/degoke/outpost): Source code, issues, and releases
+- [docs/ folder](https://github.com/degoke/outpost/tree/main/docs): Source markdown documentation
 
 ## Install
 
@@ -20,15 +21,17 @@ curl -fsSL https://raw.githubusercontent.com/degoke/outpost/main/scripts/install
 
 - `outpost host add` — register an existing Linux host over SSH
 - `outpost host create` — provision a host on AWS
-- `outpost init` — create the project environment, sync it, and open a shell (`--no-shell` for scripts)
-- `outpost shell` — open a shell in the managed project container
-- `outpost run -- COMMAND` — run a command in that container
-- `outpost up`, `outpost down`, `outpost logs`, `outpost status` — manage the project
-- `outpost open` — forward and display project ports
+- `outpost init` — create project metadata (`--no-shell` for CI, `--no-compose` when Compose is unused)
+- `outpost shell` — sync, start managed container, open interactive shell
+- `outpost run -- COMMAND` — run a command in the project environment
+- `outpost compose up`, `down`, `logs`, `exec` — manage Compose on the remote host
+- `outpost app build`, `run`, `status`, `logs`, `stop` — Dockerfile application lifecycle
+- `outpost open` / `outpost close` — forward project ports to localhost (`--port`, `--local-port`, `--service`)
+- `outpost migrate --from HOST --to HOST` — migrate full project environment between hosts
 - `outpost cleanup` — remove stale Outpost-owned project artifacts
-- `outpost cluster create` — create a Kubernetes cluster on the host (`--driver kind` or `k3d`, default kind)
-- `outpost machine create` — launch Incus containers or VMs
-- `outpost invite create` — share host access with teammates
+- `outpost cluster up` / `down` / `status` / `env` — project Kubernetes (kind or k3d)
+- `outpost machine` — project-scoped Incus container or VM
+- `outpost invite create` / `join` — share host access with teammates
 
 ## Configuration
 
@@ -41,6 +44,7 @@ Outpost uses two `.outpost` locations:
 
 - Connects over SSH; no permanent Outpost agent on the server
 - Creates one managed remote development container per project
+- `init` is metadata-first; sync and container start on `shell`, `run`, or `compose up`
 - Reads `.devcontainer/devcontainer.json` for image, workspace, ports, environment, mounts, and build settings
 - Cleans managed artifacts and retained logs according to project cleanup settings
 - Supports existing hosts or AWS-provisioned EC2 instances
@@ -49,5 +53,6 @@ Outpost uses two `.outpost` locations:
 
 ## Optional
 
-- [Full README](https://github.com/degoke/outpost/blob/main/README.md): Detailed documentation
+- [Full README](https://github.com/degoke/outpost/blob/main/README.md): Overview and quick start
+- [docs/](https://github.com/degoke/outpost/tree/main/docs): Complete command reference
 - [Install script](https://github.com/degoke/outpost/blob/main/scripts/install.sh): Bootstrap installer

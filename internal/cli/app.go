@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"os/signal"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	appsvc "github.com/degoke/outpost/internal/app"
 	"github.com/degoke/outpost/internal/authz"
 	"github.com/degoke/outpost/internal/bootstrap"
 	"github.com/degoke/outpost/internal/capabilities"
@@ -24,6 +26,7 @@ import (
 	"github.com/degoke/outpost/internal/environment"
 	"github.com/degoke/outpost/internal/host"
 	"github.com/degoke/outpost/internal/machine"
+	"github.com/degoke/outpost/internal/migrate"
 	"github.com/degoke/outpost/internal/mirror"
 	"github.com/degoke/outpost/internal/output"
 	"github.com/degoke/outpost/internal/project"
@@ -105,11 +108,9 @@ func (app *App) buildRoot() *cobra.Command {
 	root.AddCommand(app.initCmd())
 	root.AddCommand(app.dockerCmd())
 	root.AddCommand(app.composeCmd())
+	root.AddCommand(app.appCmd())
 	root.AddCommand(app.clusterCmd())
 	root.AddCommand(app.machineCmd())
-	root.AddCommand(app.kubectlCmd())
-	root.AddCommand(app.connectCmd())
-	root.AddCommand(app.mirrorCmd())
 	root.AddCommand(app.inviteCmd())
 	root.AddCommand(app.statusCmd())
 	root.AddCommand(app.topCmd())
@@ -117,15 +118,14 @@ func (app *App) buildRoot() *cobra.Command {
 	root.AddCommand(app.diskCmd())
 	root.AddCommand(app.pruneCmd())
 	root.AddCommand(app.resetCmd())
-	// Project-first shortcuts. The original grouped commands remain available
-	// for advanced workflows and backwards compatibility.
+	// Project-first commands.
 	root.AddCommand(app.projectShellCmd())
 	root.AddCommand(app.projectRunCmd())
-	root.AddCommand(app.composeSubCmd("up", true, false))
-	root.AddCommand(app.composeSubCmd("down", false, true))
-	root.AddCommand(app.composeSubCmd("logs", false, false))
+	root.AddCommand(app.projectAICmd())
 	root.AddCommand(app.projectOpenCmd())
+	root.AddCommand(app.projectCloseCmd())
 	root.AddCommand(app.cleanupCmd())
+	root.AddCommand(app.migrateCmd())
 
 	return root
 }
@@ -523,6 +523,8 @@ func (app *App) initCmd() *cobra.Command {
 				app.Out.Info("Tip: run with --write-gitignore to keep .outpost/ out of git (local-only config)")
 			}
 			if openShell && !noShell && !app.Out.JSON && isInteractiveTerminal() {
+				app.Out.Step("")
+				app.Out.Step("Opening remote shell — type exit to return")
 				return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 					return mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Shell(ctx)
 				})
@@ -548,6 +550,9 @@ func (app *App) projectShellCmd() *cobra.Command {
 		Use:   "shell",
 		Short: "Open the remote project development environment",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !app.Out.JSON && isInteractiveTerminal() {
+				app.Out.Step("Opening remote shell — type exit to return")
+			}
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 				return mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Shell(ctx)
 			})
@@ -581,12 +586,81 @@ func (app *App) projectRunCmd() *cobra.Command {
 	}
 }
 
+func (app *App) projectAICmd() *cobra.Command {
+	var (
+		command string
+		noPull  bool
+	)
+	cmd := &cobra.Command{
+		Use:   "ai [COMMAND]",
+		Short: "Run an AI coding agent in the remote project environment",
+		Long: strings.TrimSpace(`
+Syncs your project to the remote development container, starts an interactive
+AI agent there, keeps your local edits flowing up while the session is open,
+and pulls agent-made file changes back to your machine when you exit.
+
+By default Outpost tries opencode, then claude, then codex. Override with a
+positional command or ai.command in project.yaml.`),
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if command == "" && len(args) > 0 {
+				command = strings.Join(args, " ")
+			}
+			if !app.Out.JSON && isInteractiveTerminal() {
+				app.Out.Step("Opening remote AI session — exit the agent to return")
+			}
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				code, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).AI(ctx, mirror.AIOptions{
+					Command: command,
+					NoPull:  noPull,
+				})
+				if err != nil {
+					return err
+				}
+				if code != 0 {
+					os.Exit(code)
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&command, "command", "", "agent command (default: auto-detect opencode, claude, or codex)")
+	cmd.Flags().BoolVar(&noPull, "no-pull", false, "skip pulling remote file changes back after the session")
+	return cmd
+}
+
 func (app *App) projectOpenCmd() *cobra.Command {
-	return &cobra.Command{
+	var portSpecs []string
+	var localPort int
+	var service string
+	cmd := &cobra.Command{
 		Use:   "open",
 		Short: "Forward and display project ports",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.connectStart(connectStartOpts{discover: true})
+			discover := len(portSpecs) == 0
+			return app.connectStart(connectStartOpts{
+				service:           service,
+				localPortOverride: localPort,
+				portSpecs:         portSpecs,
+				discover:          discover,
+			})
+		},
+	}
+	cmd.Flags().StringArrayVar(&portSpecs, "port", nil, "forward a port mapping (local:remote or remote port only)")
+	cmd.Flags().IntVar(&localPort, "local-port", 0, "local port when forwarding a single service")
+	cmd.Flags().StringVar(&service, "service", "", "limit discovery to one Compose service")
+	return cmd
+}
+
+func (app *App) projectCloseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "close",
+		Short: "Stop project port forwarding",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.connectDown()
 		},
 	}
 }
@@ -608,6 +682,47 @@ func (app *App) cleanupCmd() *cobra.Command {
 			})
 		},
 	}
+}
+
+func (app *App) migrateCmd() *cobra.Command {
+	var fromHost, toHost string
+	var dryRun, skipVolumes, skipCluster, skipMachine, skipCompose bool
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Migrate this project's remote environment to another host",
+		Long:  "Exports the project Docker environment as a unified bundle (containers, volumes, Kubernetes), plus optional Incus machine and remote .outpost metadata, then restores everything on the destination host.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			proj, err := config.LoadProject(app.Cwd)
+			if err != nil {
+				return err
+			}
+			_, err = migrate.Run(context.Background(), migrate.Options{
+				Cwd:         app.Cwd,
+				Project:     proj,
+				Global:      app.Global,
+				FromHost:    fromHost,
+				ToHost:      toHost,
+				ForceYes:    app.ForceYes,
+				DryRun:      dryRun,
+				SkipVolumes: skipVolumes,
+				SkipCluster: skipCluster,
+				SkipMachine: skipMachine,
+				SkipCompose: skipCompose,
+				HostFlag:    app.HostFlag,
+				Out:         app.Out,
+				NewExecutor: app.newExecutor,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&fromHost, "from", "", "source host (default: current project host)")
+	cmd.Flags().StringVar(&toHost, "to", "", "destination host")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print migration plan without making changes")
+	cmd.Flags().BoolVar(&skipVolumes, "skip-volumes", false, "skip Docker bundle export/import (containers and volumes)")
+	cmd.Flags().BoolVar(&skipCluster, "skip-cluster", false, "exclude Kubernetes from the Docker bundle; do not create a cluster on destination")
+	cmd.Flags().BoolVar(&skipMachine, "skip-machine", false, "do not create project Incus machine on destination")
+	cmd.Flags().BoolVar(&skipCompose, "skip-compose", false, "do not run compose up on destination")
+	return cmd
 }
 
 func (app *App) dockerCmd() *cobra.Command {
@@ -639,9 +754,8 @@ func (app *App) dockerCmd() *cobra.Command {
 
 func (app *App) composeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:        "compose",
-		Short:      "Advanced direct Docker Compose access on the remote host",
-		Deprecated: "use `outpost up`, `outpost down`, `outpost logs`, `outpost status`, or `outpost compose exec` for service shells",
+		Use:   "compose",
+		Short: "Manage this project's Docker Compose services",
 	}
 	cmd.AddCommand(app.composeSubCmd("up", true, false))
 	cmd.AddCommand(app.composeSubCmd("down", false, true))
@@ -652,6 +766,101 @@ func (app *App) composeCmd() *cobra.Command {
 	cmd.AddCommand(app.composeSubCmd("pull", true, false))
 	cmd.AddCommand(app.composeVolumesCmd())
 	return cmd
+}
+
+func (app *App) appCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "app", Short: "Build and run this project's Dockerfile application"}
+	cmd.AddCommand(app.appBuildCmd())
+	cmd.AddCommand(app.appRunCmd())
+	cmd.AddCommand(app.appStopCmd())
+	cmd.AddCommand(app.appLogsCmd())
+	cmd.AddCommand(app.appStatusCmd())
+	return cmd
+}
+
+func (app *App) withAppRunner(run func(context.Context, transport.Executor, *config.Host, *config.Project, *appsvc.Runner) error) error {
+	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+		return run(ctx, exec, h, proj, &appsvc.Runner{Exec: exec, Project: proj, Out: app.Out})
+	})
+}
+
+func (app *App) appBuildCmd() *cobra.Command {
+	var dockerfile, buildContext string
+	cmd := &cobra.Command{Use: "build", Short: "Build the project's Dockerfile application image", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withAppRunner(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, runner *appsvc.Runner) error {
+			if _, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).SyncIfNeeded(ctx, false); err != nil {
+				return err
+			}
+			return runner.Build(ctx, dockerfile, buildContext)
+		})
+	}}
+	cmd.Flags().StringVar(&dockerfile, "dockerfile", "Dockerfile", "Dockerfile path relative to the project")
+	cmd.Flags().StringVar(&buildContext, "context", ".", "Docker build context relative to the project")
+	return cmd
+}
+
+func (app *App) appRunCmd() *cobra.Command {
+	var ports []string
+	var detach, build bool
+	cmd := &cobra.Command{Use: "run [--port HOST:CONTAINER] [--detach] [--build] [-- COMMAND...]", Short: "Run the built Dockerfile application", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withAppRunner(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, runner *appsvc.Runner) error {
+			if build {
+				if _, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).SyncIfNeeded(ctx, false); err != nil {
+					return err
+				}
+				if err := runner.Build(ctx, "Dockerfile", "."); err != nil {
+					return err
+				}
+			}
+			code, err := runner.Run(ctx, ports, detach, args)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				os.Exit(code)
+			}
+			return nil
+		})
+	}}
+	cmd.Flags().StringArrayVar(&ports, "port", nil, "publish a port (HOST:CONTAINER)")
+	cmd.Flags().BoolVarP(&detach, "detach", "d", false, "run in the background")
+	cmd.Flags().BoolVar(&build, "build", false, "build the image before running")
+	return cmd
+}
+
+func (app *App) appStopCmd() *cobra.Command {
+	return &cobra.Command{Use: "stop", Short: "Stop the project application container", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withAppRunner(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, runner *appsvc.Runner) error {
+			return runner.Stop(ctx)
+		})
+	}}
+}
+
+func (app *App) appLogsCmd() *cobra.Command {
+	var follow bool
+	cmd := &cobra.Command{Use: "logs", Short: "Show project application logs", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withAppRunner(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, runner *appsvc.Runner) error {
+			return runner.Logs(ctx, follow)
+		})
+	}}
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow logs")
+	return cmd
+}
+
+func (app *App) appStatusCmd() *cobra.Command {
+	return &cobra.Command{Use: "status", Short: "Show the project application status", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withAppRunner(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, runner *appsvc.Runner) error {
+			status, err := runner.Status(ctx)
+			if err != nil {
+				return err
+			}
+			if app.Out.JSON {
+				return app.Out.PrintJSON(map[string]string{"status": strings.TrimSpace(status), "image": runner.Image(), "container": runner.Container()})
+			}
+			app.Out.Info("Application: %s", strings.TrimSpace(status))
+			return nil
+		})
+	}}
 }
 
 func (app *App) composeVolumesCmd() *cobra.Command {
@@ -786,41 +995,6 @@ func (app *App) composeSubCmd(sub string, uploadFirst, checkDestructive bool) *c
 	}
 }
 
-func (app *App) connectCmd() *cobra.Command {
-	var service string
-	var status, down, foreground, discover bool
-	var localPort int
-	var portSpecs []string
-	cmd := &cobra.Command{
-		Use:        "connect",
-		Short:      "Forward Compose service ports to localhost",
-		Deprecated: "use `outpost open` instead",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if status {
-				return app.connectStatus()
-			}
-			if down {
-				return app.connectDown()
-			}
-			return app.connectStart(connectStartOpts{
-				service:           service,
-				localPortOverride: localPort,
-				portSpecs:         portSpecs,
-				foreground:        foreground,
-				discover:          discover,
-			})
-		},
-	}
-	cmd.Flags().StringVar(&service, "service", "", "forward ports for a single service")
-	cmd.Flags().BoolVar(&status, "status", false, "show active forwarding sessions")
-	cmd.Flags().BoolVar(&down, "down", false, "stop forwarding sessions")
-	cmd.Flags().BoolVarP(&foreground, "foreground", "f", false, "run in the foreground until Ctrl+C (default runs in background)")
-	cmd.Flags().BoolVar(&discover, "discover", false, "discover all published ports from the running remote compose stack")
-	cmd.Flags().IntVar(&localPort, "local-port", 0, "override local port for single-service mode")
-	cmd.Flags().StringArrayVar(&portSpecs, "port", nil, "manual port mapping (e.g. 8080:80)")
-	return cmd
-}
-
 type connectStartOpts struct {
 	service           string
 	localPortOverride int
@@ -845,14 +1019,37 @@ func (app *App) connectStart(opts connectStartOpts) error {
 			return fmt.Errorf("started background forwarder (pid %d) but session was not ready: %w", pid, err)
 		}
 		for _, f := range sess.Forwards {
+			if f.Service == "kubernetes" {
+				app.Out.Success("Kubernetes API tunnel ready on 127.0.0.1:%d", f.LocalPort)
+				continue
+			}
 			app.Out.Success("%s (service: %s)", f.URL, f.Service)
 		}
-		app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost connect --down", pid)
+		app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost close", pid)
 		return nil
 	}
 
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-		if len(opts.portSpecs) == 0 {
+		hasKubernetes := proj.Kubernetes != nil
+		var kubeconfig []byte
+		var kubeRemotePort, kubeLocalPort int
+		if hasKubernetes {
+			projectCluster := cluster.NewProjectService(exec, proj, app.Cwd, app.Out)
+			var err error
+			kubeconfig, err = projectCluster.Kubeconfig()
+			if err != nil {
+				return fmt.Errorf("project Kubernetes cluster is not ready — run 'outpost cluster up' first: %w", err)
+			}
+			kubeRemotePort, err = projectCluster.APIPort(kubeconfig)
+			if err != nil {
+				return err
+			}
+			kubeLocalPort, err = connect.AvailablePort("127.0.0.1", kubeRemotePort)
+			if err != nil {
+				return err
+			}
+		}
+		if len(opts.portSpecs) == 0 && !hasKubernetes {
 			if err := proj.RequireCompose(); err != nil && !(proj.EnvironmentEnabled() && proj.Environment != nil && len(proj.Environment.Ports) > 0) {
 				return err
 			}
@@ -860,22 +1057,87 @@ func (app *App) connectStart(opts connectStartOpts) error {
 		if err := connect.EnsureNoActiveSession(h.Name, proj.Name); err != nil {
 			return err
 		}
+		if hasKubernetes {
+			_ = os.Remove(cluster.LocalProjectKubeconfigPath(app.Cwd))
+		}
 		composeArgs := upload.RemoteComposeArgs(proj)
-		mappings, err := connect.ResolvePortMappings(ctx, exec, app.Cwd, proj, composeArgs, connect.ResolveOptions{
-			Service:     opts.service,
-			Discover:    opts.discover,
-			ManualSpecs: opts.portSpecs,
-		})
-		if err != nil {
-			return err
+		var mappings []connect.PortMapping
+		var err error
+		if len(opts.portSpecs) > 0 || opts.discover || proj.RequireCompose() == nil || (proj.EnvironmentEnabled() && proj.Environment != nil && len(proj.Environment.Ports) > 0) {
+			mappings, err = connect.ResolvePortMappings(ctx, exec, app.Cwd, proj, composeArgs, connect.ResolveOptions{
+				Service:     opts.service,
+				Discover:    opts.discover,
+				ManualSpecs: opts.portSpecs,
+			})
+			if err != nil {
+				if !hasKubernetes {
+					return err
+				}
+				mappings = nil
+			}
+		} else if !hasKubernetes {
+			return fmt.Errorf("no application ports to forward")
 		}
 		overrides := map[string]int{}
 		if opts.localPortOverride > 0 && len(mappings) == 1 {
 			overrides[mappings[0].Service] = opts.localPortOverride
 		}
+		if hasKubernetes {
+			for {
+				conflict := false
+				for _, mapping := range mappings {
+					localPort := mapping.HostPort
+					if override, ok := overrides[mapping.Service]; ok {
+						localPort = override
+					}
+					if localPort == kubeLocalPort {
+						conflict = true
+						break
+					}
+				}
+				if !conflict {
+					break
+				}
+				kubeLocalPort, err = connect.AvailablePort("127.0.0.1", 0)
+				if err != nil {
+					return err
+				}
+			}
+			mappings = append(mappings, connect.PortMapping{Service: "kubernetes", HostPort: kubeRemotePort, TargetPort: kubeRemotePort, BindHost: "127.0.0.1"})
+		}
+		if hasKubernetes {
+			overrides["kubernetes"] = kubeLocalPort
+		}
 		forwards, closers, err := connect.StartForwards(ctx, exec, mappings, overrides)
 		if err != nil {
 			return err
+		}
+		if hasKubernetes {
+			for _, f := range forwards {
+				if f.Service != "kubernetes" {
+					continue
+				}
+				rewritten, rewriteErr := cluster.RewriteKubeconfigServer(kubeconfig, f.LocalPort)
+				if rewriteErr != nil {
+					for _, c := range closers {
+						c.Close()
+					}
+					return rewriteErr
+				}
+				if mkdirErr := os.MkdirAll(filepath.Dir(cluster.LocalProjectKubeconfigPath(app.Cwd)), 0700); mkdirErr != nil {
+					for _, c := range closers {
+						c.Close()
+					}
+					return mkdirErr
+				}
+				if writeErr := os.WriteFile(cluster.LocalProjectKubeconfigPath(app.Cwd), rewritten, 0600); writeErr != nil {
+					for _, c := range closers {
+						c.Close()
+					}
+					return writeErr
+				}
+				break
+			}
 		}
 		sess := &connect.Session{
 			Host:      h.Name,
@@ -891,12 +1153,16 @@ func (app *App) connectStart(opts connectStartOpts) error {
 			return err
 		}
 		for _, f := range forwards {
+			if f.Service == "kubernetes" {
+				app.Out.Success("Kubernetes API tunnel ready on 127.0.0.1:%d", f.LocalPort)
+				continue
+			}
 			app.Out.Success("%s (service: %s)", f.URL, f.Service)
 		}
 		if opts.foreground {
 			app.Out.Info("Press Ctrl+C to stop forwarding")
 		} else {
-			app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost connect --down", os.Getpid())
+			app.Out.Info("Forwarding running in background (pid %d). Stop with: outpost close", os.Getpid())
 		}
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -904,31 +1170,13 @@ func (app *App) connectStart(opts connectStartOpts) error {
 		for _, c := range closers {
 			c.Close()
 		}
+		if hasKubernetes {
+			_ = os.Remove(cluster.LocalProjectKubeconfigPath(app.Cwd))
+		}
 		_ = connect.RemoveSession(h.Name, proj.Name)
 		return nil
 	})
 }
-
-func (app *App) connectStatus() error {
-	proj, err := config.LoadProject(app.Cwd)
-	if err != nil {
-		return err
-	}
-	hostName := app.resolveHostName(proj)
-	sess, err := connect.LoadActiveSession(hostName, proj.Name)
-	if err != nil {
-		app.Out.Info("No active forwarding session")
-		return nil
-	}
-	if app.Out.JSON {
-		return app.Out.PrintJSON(sess)
-	}
-	for _, f := range sess.Forwards {
-		app.Out.Info("%s (service: %s)", f.URL, f.Service)
-	}
-	return nil
-}
-
 func (app *App) connectDown() error {
 	proj, err := config.LoadProject(app.Cwd)
 	if err != nil {
@@ -938,391 +1186,12 @@ func (app *App) connectDown() error {
 	if err := connect.StopSession(hostName, proj.Name); err != nil {
 		return err
 	}
+	if proj.Kubernetes != nil {
+		_ = os.Remove(cluster.LocalProjectKubeconfigPath(app.Cwd))
+	}
 	app.Out.Success("Forwarding session stopped")
 	return nil
 }
-
-func (app *App) mirrorCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:        "mirror",
-		Short:      "Advanced sync and remote execution commands",
-		Deprecated: "use the project-first commands instead (`outpost shell`, `outpost run`, `outpost up`)",
-	}
-	cmd.AddCommand(app.mirrorSyncCmd())
-	cmd.AddCommand(app.mirrorWatchCmd())
-	cmd.AddCommand(app.mirrorSetupPythonCmd())
-	cmd.AddCommand(app.mirrorSetupToolchainCmd())
-	cmd.AddCommand(app.mirrorToolchainCmd())
-	cmd.AddCommand(app.mirrorRunCmd())
-	cmd.AddCommand(app.mirrorShellCmd())
-	cmd.AddCommand(app.mirrorSessionsCmd())
-	return cmd
-}
-
-func (app *App) mirrorSyncCmd() *cobra.Command {
-	var useRsync, forceSFTP bool
-	var workers int
-	cmd := &cobra.Command{
-		Use:        "sync",
-		Short:      "Sync the repository to the remote project directory",
-		Deprecated: "sync is handled automatically by `outpost shell` and `outpost up`",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				runner.SyncUseRsync = useRsync
-				runner.SyncForceSFTP = forceSFTP
-				runner.SyncWorkers = workers
-				if err := runner.SyncExplicit(ctx); err != nil {
-					return err
-				}
-				app.Out.Success("Repository synced to %s", proj.RemoteDir)
-				return nil
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for faster incremental sync (requires rsync locally and on the remote)")
-	cmd.Flags().BoolVar(&forceSFTP, "sftp", false, "Force the SFTP fallback transport")
-	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
-	return cmd
-}
-
-func (app *App) mirrorWatchCmd() *cobra.Command {
-	var useRsync, forceSFTP bool
-	var workers int
-	var debounce time.Duration
-	cmd := &cobra.Command{
-		Use:        "watch",
-		Short:      "Continuously sync repository changes to the remote",
-		Deprecated: "file watching happens automatically during `outpost shell` sessions",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				watchCtx, cancel := mirror.WatchContext(ctx)
-				defer cancel()
-				return runner.Watch(watchCtx, mirror.WatchOptions{
-					SyncOptions: mirror.SyncOptions{
-						UseRsync:  useRsync,
-						ForceSFTP: forceSFTP,
-						Workers:   workers,
-					},
-					Debounce: debounce,
-				})
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for each sync (requires rsync locally and on the remote)")
-	cmd.Flags().BoolVar(&forceSFTP, "sftp", false, "Force the SFTP fallback transport")
-	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
-	cmd.Flags().DurationVar(&debounce, "debounce", time.Second, "Debounce interval before syncing changes")
-	return cmd
-}
-
-func (app *App) mirrorSetupPythonCmd() *cobra.Command {
-	var pythonBin, requirements string
-	cmd := &cobra.Command{
-		Use:        "setup-python",
-		Short:      "Create a remote Python virtual environment and install requirements",
-		Deprecated: "Python setup is handled automatically by `outpost run` in the managed environment",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				if err := runner.SetupPython(ctx, mirror.SetupPythonOptions{
-					Python:       pythonBin,
-					Requirements: requirements,
-				}); err != nil {
-					return err
-				}
-				app.Out.Success("Remote Python environment ready at %s/%s", proj.RemoteDir, runner.VenvPath())
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringVar(&pythonBin, "python", "python3", "Python interpreter for creating the venv")
-	cmd.Flags().StringVar(&requirements, "requirements", "", "requirements file (default from project.yaml or requirements.txt)")
-	return cmd
-}
-
-func (app *App) mirrorSetupToolchainCmd() *cobra.Command {
-	var useRsync bool
-	var workers int
-	cmd := &cobra.Command{
-		Use:        "setup-toolchain",
-		Short:      "Install project toolchain packages and runtimes on the remote host",
-		Deprecated: "toolchain installation is automatic in `outpost run` within the managed environment",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				runner.SyncUseRsync = useRsync
-				runner.SyncWorkers = workers
-				plan, err := runner.SetupToolchain(ctx)
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(plan)
-				}
-				if plan.Empty() {
-					app.Out.Info("No toolchain requirements detected")
-					return nil
-				}
-				app.Out.Success("Remote toolchain ready")
-				return nil
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&useRsync, "rsync", false, "Use rsync for repository sync (requires rsync locally and on the remote)")
-	cmd.Flags().IntVar(&workers, "workers", upload.DefaultSyncWorkers, "Parallel upload workers (SFTP mode only)")
-	return cmd
-}
-
-func (app *App) mirrorToolchainCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:        "toolchain",
-		Short:      "Inspect project toolchain requirements",
-		Deprecated: "toolchain detection is automatic in `outpost run` within the managed environment",
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "plan",
-		Short: "Show packages and runtimes that would be installed on the remote host",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			proj, err := config.LoadProject(app.Cwd)
-			if err != nil {
-				return err
-			}
-			commandArgs := args
-			if len(commandArgs) > 0 && commandArgs[0] == "--" {
-				commandArgs = commandArgs[1:]
-			}
-			command := strings.Join(commandArgs, " ")
-			plan, err := mirror.DetectPlan(app.Cwd, proj, command)
-			if err != nil {
-				return err
-			}
-			if app.Out.JSON {
-				return app.Out.PrintJSON(plan)
-			}
-			if plan.Empty() {
-				app.Out.Info("No toolchain requirements detected")
-				return nil
-			}
-			if len(plan.Packages) > 0 {
-				app.Out.Info("Packages: %s", strings.Join(plan.Packages, ", "))
-			}
-			if plan.GoVersion != "" {
-				app.Out.Info("Go: %s", plan.GoVersion)
-			}
-			return nil
-		},
-	})
-	return cmd
-}
-
-func (app *App) mirrorRunCmd() *cobra.Command {
-	var detach bool
-	var sessionName string
-	var noSync bool
-	var forceSync bool
-	var noVenv bool
-	var noToolchain bool
-	var useRsync, forceSFTP bool
-	var workers int
-	cmd := &cobra.Command{
-		Use:                "run [flags] -- COMMAND [ARGS...]",
-		Short:              "Run a command in the remote project directory",
-		Deprecated:         "use `outpost run -- COMMAND` instead",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			rest := args
-			var commandArgs []string
-			for len(rest) > 0 {
-				if rest[0] == "--" {
-					rest = rest[1:]
-					commandArgs = rest
-					break
-				}
-				if !strings.HasPrefix(rest[0], "-") {
-					commandArgs = rest
-					break
-				}
-				switch rest[0] {
-				case "-d", "--detach":
-					detach = true
-				case "--name":
-					if len(rest) < 2 {
-						return fmt.Errorf("--name requires a value")
-					}
-					sessionName = rest[1]
-					rest = rest[2:]
-					continue
-				case "--no-sync":
-					noSync = true
-				case "--sync":
-					forceSync = true
-				case "--no-venv":
-					noVenv = true
-				case "--no-toolchain":
-					noToolchain = true
-				case "--rsync":
-					useRsync = true
-				case "--sftp":
-					forceSFTP = true
-				case "--workers":
-					if len(rest) < 2 {
-						return fmt.Errorf("--workers requires a value")
-					}
-					n, err := strconv.Atoi(rest[1])
-					if err != nil || n < 1 {
-						return fmt.Errorf("--workers requires a positive integer")
-					}
-					workers = n
-					rest = rest[2:]
-					continue
-				default:
-					return fmt.Errorf("unknown flag %q", rest[0])
-				}
-				rest = rest[1:]
-			}
-			if len(commandArgs) == 0 {
-				return fmt.Errorf("command is required")
-			}
-			command := strings.Join(commandArgs, " ")
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				runner.SyncUseRsync = useRsync
-				runner.SyncForceSFTP = forceSFTP
-				if workers > 0 {
-					runner.SyncWorkers = workers
-				}
-				result, err := runner.Run(ctx, mirror.RunOptions{
-					Detach:      detach,
-					SessionName: sessionName,
-					NoSync:      noSync,
-					ForceSync:   forceSync,
-					NoVenv:      noVenv,
-					NoToolchain: noToolchain,
-					Command:     command,
-				})
-				if err != nil {
-					return err
-				}
-				if detach {
-					app.Out.Success("Started detached session %q", result.SessionName)
-					return nil
-				}
-				if result.ExitCode != 0 {
-					os.Exit(result.ExitCode)
-				}
-				return nil
-			})
-		},
-	}
-	return cmd
-}
-
-func (app *App) mirrorShellCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:        "shell",
-		Short:      "Open an interactive shell in the remote project directory",
-		Deprecated: "use `outpost shell` instead",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				return runner.Shell(ctx)
-			})
-		},
-	}
-}
-
-func (app *App) mirrorSessionsCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "sessions", Short: "Manage detached mirror sessions"}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List mirror sessions for this project",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				sessions, err := runner.ListSessions(ctx)
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(sessions)
-				}
-				if len(sessions) == 0 {
-					app.Out.Info("No mirror sessions")
-					return nil
-				}
-				for _, s := range sessions {
-					state := "running"
-					if !s.Running {
-						state = "stopped"
-					}
-					app.Out.Info("%s (%s)", s.Name, state)
-				}
-				return nil
-			})
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "status NAME",
-		Short: "Show session status and recent log output",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				status, err := runner.SessionStatus(ctx, args[0])
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(status)
-				}
-				if status.Running {
-					app.Out.Info("Session %q is running", status.Name)
-				} else if status.ExitCode != nil {
-					app.Out.Info("Session %q finished with exit code %d", status.Name, *status.ExitCode)
-				} else {
-					app.Out.Info("Session %q is not running", status.Name)
-				}
-				if status.Command != "" {
-					app.Out.Info("Command: %s", status.Command)
-				}
-				if status.LogTail != "" {
-					app.Out.Info("Recent output:\n%s", status.LogTail)
-				}
-				return nil
-			})
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "attach NAME",
-		Short: "Attach to a mirror session",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				return runner.AttachSession(ctx, args[0])
-			})
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "kill NAME",
-		Short: "Stop a mirror session",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				runner := mirror.New(exec, proj, app.Cwd, h.Name, app.Out)
-				if err := runner.KillSession(ctx, args[0]); err != nil {
-					return err
-				}
-				app.Out.Success("Stopped session %s", args[0])
-				return nil
-			})
-		},
-	})
-	return cmd
-}
-
 func (app *App) inviteCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "invite", Short: "Manage host sharing invitations"}
 	cmd.AddCommand(app.inviteCreateCmd())
@@ -1625,530 +1494,377 @@ func (app *App) capacityCmd() *cobra.Command {
 		},
 	}
 }
-
-func (app *App) withClusterExecutor(run func(context.Context, transport.Executor, *config.Host, *cluster.Service) error) error {
-	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
-		if err := bootstrap.EnsureKubernetesToolsWithOut(ctx, exec, app.Out); err != nil {
-			return err
-		}
-		svc := &cluster.Service{Exec: exec, Out: app.Out, HostName: h.Name}
-		return run(ctx, exec, h, svc)
-	})
+func (app *App) machineCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "machine", Short: "Manage this project's Incus machine"}
+	cmd.AddCommand(app.projectMachineUpCmd())
+	cmd.AddCommand(app.projectMachineDownCmd())
+	cmd.AddCommand(app.projectMachineStatusCmd())
+	cmd.AddCommand(app.projectMachineShellCmd())
+	cmd.AddCommand(app.projectMachineExecCmd())
+	cmd.AddCommand(app.projectMachineCopyCmd())
+	cmd.AddCommand(app.projectMachineConnectCmd())
+	cmd.AddCommand(app.projectMachineSnapshotCmd())
+	return cmd
 }
-
-func (app *App) withMachineExecutor(run func(context.Context, transport.Executor, *config.Host, *machine.Service) error) error {
-	return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
+func (app *App) withProjectMachineExecutor(run func(context.Context, transport.Executor, *config.Host, *config.Project, *machine.ProjectService) error) error {
+	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
 		if err := bootstrap.EnsureIncusWithOut(ctx, exec, app.Out); err != nil {
 			return err
 		}
-		svc := &machine.Service{Exec: exec, Out: app.Out, HostName: h.Name}
-		return run(ctx, exec, h, svc)
+		return run(ctx, exec, h, proj, machine.NewProjectService(exec, proj, app.Out))
 	})
 }
 
-func (app *App) machineCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "machine", Short: "Manage Incus Linux machines on the remote host"}
-	cmd.AddCommand(app.machineCreateCmd())
-	cmd.AddCommand(app.machineListCmd())
-	cmd.AddCommand(app.machineStatusCmd())
-	cmd.AddCommand(app.machineStartCmd())
-	cmd.AddCommand(app.machineStopCmd())
-	cmd.AddCommand(app.machineRestartCmd())
-	cmd.AddCommand(app.machineShellCmd())
-	cmd.AddCommand(app.machineExecCmd())
-	cmd.AddCommand(app.machineCopyCmd())
-	cmd.AddCommand(app.machineConnectCmd())
-	cmd.AddCommand(app.machineSnapshotCmd())
-	cmd.AddCommand(app.machineDeleteCmd())
-	return cmd
-}
-
-func (app *App) machineCreateCmd() *cobra.Command {
-	var image string
+func (app *App) projectMachineUpCmd() *cobra.Command {
+	var image, memory, disk string
 	var cpu float64
-	var memory, disk string
 	var virtualMachine bool
 	cmd := &cobra.Command{
-		Use:   "create NAME",
-		Short: "Create a Linux machine (system container by default)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "up",
+		Short: "Create or reuse this project's Incus machine",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host) error {
-				if err := authz.RequireOwner(h, "machine create"); err != nil {
+			return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+				opts := machine.CreateOptions{}
+				if proj.Machine != nil {
+					opts.Image, opts.CPU, opts.VirtualMachine = proj.Machine.Image, proj.Machine.CPU, proj.Machine.VirtualMachine
+					if proj.Machine.Memory != "" {
+						v, err := machine.ParseSize(proj.Machine.Memory)
+						if err != nil {
+							return err
+						}
+						opts.MemoryBytes = v
+					}
+					if proj.Machine.Disk != "" {
+						v, err := machine.ParseSize(proj.Machine.Disk)
+						if err != nil {
+							return err
+						}
+						opts.DiskBytes = v
+					}
+				}
+				if cmd.Flags().Changed("image") {
+					opts.Image = image
+				}
+				if cmd.Flags().Changed("cpu") {
+					opts.CPU = cpu
+				}
+				if cmd.Flags().Changed("memory") {
+					v, err := machine.ParseSize(memory)
+					if err != nil {
+						return err
+					}
+					opts.MemoryBytes = v
+				}
+				if cmd.Flags().Changed("disk") {
+					v, err := machine.ParseSize(disk)
+					if err != nil {
+						return err
+					}
+					opts.DiskBytes = v
+				}
+				if cmd.Flags().Changed("virtual-machine") {
+					opts.VirtualMachine = virtualMachine
+				}
+				if err := svc.Up(ctx, opts, h.Provider); err != nil {
 					return err
 				}
-				opts := machine.CreateOptions{
-					Image:          image,
-					CPU:            cpu,
-					VirtualMachine: virtualMachine,
-				}
-				if memory != "" {
-					memBytes, err := machine.ParseSize(memory)
-					if err != nil {
-						return err
-					}
-					opts.MemoryBytes = memBytes
-				}
-				if disk != "" {
-					diskBytes, err := machine.ParseSize(disk)
-					if err != nil {
-						return err
-					}
-					opts.DiskBytes = diskBytes
-				}
-				svc := &machine.Service{Exec: exec, Out: app.Out, HostName: h.Name}
-				return svc.Create(ctx, args[0], opts, h.Provider)
+				opts.ApplyDefaults()
+				proj.Machine = &config.ProjectMachine{Image: opts.Image, CPU: opts.CPU, Memory: machine.FormatSize(opts.MemoryBytes), Disk: machine.FormatSize(opts.DiskBytes), VirtualMachine: opts.VirtualMachine}
+				return config.SaveProject(app.Cwd, proj)
 			})
 		},
 	}
-	cmd.Flags().StringVar(&image, "image", "ubuntu:24.04", "Incus image alias")
-	cmd.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores (default: 0.5 container, 1 VM)")
-	cmd.Flags().StringVar(&memory, "memory", "", "memory limit (default: 128MiB container, 256MiB VM; e.g. 2GiB)")
-	cmd.Flags().StringVar(&disk, "disk", "", "root disk size (default: 2GiB container, 3GiB VM; e.g. 20GiB)")
-	cmd.Flags().BoolVar(&virtualMachine, "virtual-machine", false, "create a hardware-virtualized VM (requires KVM)")
+	cmd.Flags().StringVar(&image, "image", "", "Incus image alias")
+	cmd.Flags().Float64Var(&cpu, "cpu", 0, "CPU cores")
+	cmd.Flags().StringVar(&memory, "memory", "", "memory limit (e.g. 2GiB)")
+	cmd.Flags().StringVar(&disk, "disk", "", "root disk size (e.g. 20GiB)")
+	cmd.Flags().BoolVar(&virtualMachine, "virtual-machine", false, "create a hardware-virtualized VM")
 	return cmd
 }
 
-func (app *App) machineListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List machines",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				machines, err := svc.List(ctx)
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(machines)
-				}
-				if len(machines) == 0 {
-					app.Out.Info("No machines found")
-					return nil
-				}
-				for _, m := range machines {
-					app.Out.Info("%s  type=%s (%s)  status=%s  cpu=%.0f  mem=%s  disk=%s  ip=%s",
-						m.Name, m.Type, machine.TypeLabel(m.Type), m.Status, m.CPU,
-						machine.FormatSize(m.MemoryBytes), machine.FormatSize(m.DiskBytes), m.IPv4)
-				}
-				return nil
-			})
-		},
-	}
-}
-
-func (app *App) machineStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status NAME",
-		Short: "Show machine status",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				m, err := svc.Status(ctx, args[0])
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(m)
-				}
-				app.Out.Info("Machine %s: type=%s (%s) status=%s image=%s ip=%s",
-					m.Name, m.Type, machine.TypeLabel(m.Type), m.Status, m.Image, m.IPv4)
-				return nil
-			})
-		},
-	}
-}
-
-func (app *App) machineStartCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "start NAME",
-		Short: "Start a machine",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.Start(ctx, args[0])
-			})
-		},
-	}
-}
-
-func (app *App) machineStopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "stop NAME",
-		Short: "Stop a machine",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.Stop(ctx, args[0])
-			})
-		},
-	}
-}
-
-func (app *App) machineRestartCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "restart NAME",
-		Short: "Restart a machine",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.Restart(ctx, args[0])
-			})
-		},
-	}
-}
-
-func (app *App) machineShellCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "shell NAME",
-		Short: "Open an interactive shell in a machine",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.Shell(ctx, args[0])
-			})
-		},
-	}
-}
-
-func (app *App) machineExecCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:                "exec NAME -- COMMAND [ARGS...]",
-		Short:              "Run a command in a machine",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 1 {
-				return fmt.Errorf("machine name is required")
+func (app *App) projectMachineDownCmd() *cobra.Command {
+	return &cobra.Command{Use: "down", Short: "Delete this project's Incus machine", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			if err := authz.RequireOwner(h, "machine down"); err != nil {
+				return err
 			}
-			name := args[0]
-			rest := args[1:]
-			for len(rest) > 0 && rest[0] == "--" {
-				rest = rest[1:]
+			count, _ := share.ApprovedCount(ctx, exec)
+			if err := authz.ConfirmDestructive(count, "machine down", app.ForceYes); err != nil {
+				return err
 			}
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				code, err := svc.RunCommand(ctx, name, rest)
-				if err != nil {
+			if !app.ForceYes {
+				if err := authz.ConfirmPrompt("This will permanently delete the project's Incus machine"); err != nil {
 					return err
 				}
-				if code != 0 {
-					os.Exit(code)
-				}
-				return nil
-			})
-		},
-	}
+			}
+			if err := svc.Down(ctx); err != nil {
+				return err
+			}
+			if err := config.SaveProject(app.Cwd, proj); err != nil {
+				return err
+			}
+			app.Out.Success("Deleted project machine")
+			return nil
+		})
+	}}
 }
 
-func (app *App) machineCopyCmd() *cobra.Command {
+func (app *App) projectMachineStatusCmd() *cobra.Command {
+	return &cobra.Command{Use: "status", Short: "Show this project's machine status", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			m, err := svc.Status(ctx)
+			if err != nil {
+				return err
+			}
+			if app.Out.JSON {
+				return app.Out.PrintJSON(m)
+			}
+			app.Out.Info("Project machine: type=%s (%s) status=%s image=%s ip=%s", m.Type, machine.TypeLabel(m.Type), m.Status, m.Image, m.IPv4)
+			return nil
+		})
+	}}
+}
+
+func (app *App) projectMachineShellCmd() *cobra.Command {
+	return &cobra.Command{Use: "shell", Short: "Open a shell in this project's machine", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			return svc.Shell(ctx)
+		})
+	}}
+}
+
+func (app *App) projectMachineExecCmd() *cobra.Command {
+	return &cobra.Command{Use: "exec -- COMMAND [ARGS...]", Short: "Run a command in this project's machine", DisableFlagParsing: true, RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 && args[0] == "--" {
+			args = args[1:]
+		}
+		if len(args) == 0 {
+			return fmt.Errorf("command is required")
+		}
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			code, err := svc.RunCommand(ctx, args)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				os.Exit(code)
+			}
+			return nil
+		})
+	}}
+}
+
+func (app *App) projectMachineCopyCmd() *cobra.Command {
 	var recursive bool
-	cmd := &cobra.Command{
-		Use:   "copy SRC DST",
-		Short: "Copy files between your computer and a machine",
-		Long:  "Use NAME:/path for machine paths, e.g. outpost machine copy ./app ubuntu-dev:/tmp/app",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.Copy(ctx, args[0], args[1], recursive)
-			})
-		},
-	}
+	cmd := &cobra.Command{Use: "copy SRC DST", Short: "Copy files between your computer and this project's machine", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			return svc.Copy(ctx, args[0], args[1], recursive)
+		})
+	}}
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "recursively copy directories")
 	return cmd
 }
 
-func (app *App) machineConnectCmd() *cobra.Command {
-	var portSpecs []string
-	var bindHost string
-	cmd := &cobra.Command{
-		Use:   "connect NAME",
-		Short: "Forward ports from a machine to localhost",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				forwards, closers, err := svc.StartConnect(ctx, args[0], portSpecs, bindHost)
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(forwards)
-				}
-				for _, f := range forwards {
-					app.Out.Success("%s -> machine port %d", f.URL, f.RemotePort)
-				}
-				app.Out.Info("Press Ctrl+C to stop forwarding")
-				sigCh := make(chan os.Signal, 1)
-				signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-				<-sigCh
-				for _, c := range closers {
-					c.Close()
-				}
-				return nil
-			})
-		},
-	}
-	cmd.Flags().StringArrayVar(&portSpecs, "port", nil, "port mapping (local:remote or just remote)")
-	cmd.Flags().StringVar(&bindHost, "bind", "127.0.0.1", "local address to bind")
-	return cmd
-}
-
-func (app *App) machineSnapshotCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "snapshot", Short: "Manage machine snapshots"}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "create NAME [SNAPSHOT]",
-		Short: "Create a snapshot",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			snap := ""
-			if len(args) > 1 {
-				snap = args[1]
-			}
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				return svc.SnapshotCreate(ctx, args[0], snap)
-			})
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list NAME",
-		Short: "List snapshots",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				snaps, err := svc.SnapshotList(ctx, args[0])
-				if err != nil {
-					return err
-				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(snaps)
-				}
-				if len(snaps) == 0 {
-					app.Out.Info("No snapshots")
-					return nil
-				}
-				for _, s := range snaps {
-					app.Out.Info("%s", s)
-				}
-				return nil
-			})
-		},
-	})
-	cmd.AddCommand(&cobra.Command{
-		Use:   "delete NAME SNAPSHOT",
-		Short: "Delete a snapshot",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				if err := authz.RequireOwner(h, "machine snapshot delete"); err != nil {
-					return err
-				}
-				return svc.SnapshotDelete(ctx, args[0], args[1])
-			})
-		},
-	})
-	return cmd
-}
-
-func (app *App) machineDeleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete NAME",
-		Short: "Delete a machine",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *machine.Service) error {
-				if err := authz.RequireOwner(h, "machine delete"); err != nil {
-					return err
-				}
-				info, err := svc.DeleteInfo(ctx, args[0])
-				if err != nil {
-					return err
-				}
-				count, _ := share.ApprovedCount(ctx, exec)
-				if err := authz.ConfirmDestructive(count, "machine delete", app.ForceYes); err != nil {
-					return err
-				}
-				if !app.ForceYes {
-					m, _ := svc.Status(ctx, args[0])
-					msg := fmt.Sprintf("This will permanently delete the machine and %s of disk data", machine.FormatSize(info.DiskBytes))
-					if info.SnapshotCount > 0 {
-						msg += fmt.Sprintf(" plus %d snapshot(s)", info.SnapshotCount)
-						if info.SnapshotBytes > 0 {
-							msg += fmt.Sprintf(" (~%s)", machine.FormatSize(info.SnapshotBytes))
-						}
-					}
-					if m != nil && m.Type == machine.TypeVM {
-						msg += " (virtual machine disks may be larger than configured limits)"
-					}
-					if err := authz.ConfirmPrompt(msg); err != nil {
-						return err
-					}
-				}
-				if err := svc.Delete(ctx, args[0]); err != nil {
-					return err
-				}
-				app.Out.Success("Deleted machine %q", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func (app *App) clusterCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "cluster", Short: "Manage Kubernetes clusters on the remote host"}
-	cmd.AddCommand(app.clusterCreateCmd())
-	cmd.AddCommand(app.clusterListCmd())
-	cmd.AddCommand(app.clusterStatusCmd())
-	cmd.AddCommand(app.clusterDeleteCmd())
-	return cmd
-}
-
-func (app *App) clusterCreateCmd() *cobra.Command {
-	var workers, controlPlanes int
-	var driver string
-	cmd := &cobra.Command{
-		Use:   "create NAME",
-		Short: "Create a named Kubernetes cluster",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			drv, err := cluster.ParseDriver(driver)
+func (app *App) projectMachineConnectCmd() *cobra.Command {
+	var ports []string
+	var bind string
+	cmd := &cobra.Command{Use: "connect", Short: "Forward ports from this project's machine", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			forwards, closers, err := svc.StartConnect(ctx, ports, bind)
 			if err != nil {
 				return err
 			}
-			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				return svc.Create(ctx, args[0], drv, workers, controlPlanes)
-			})
-		},
-	}
-	cmd.Flags().IntVar(&workers, "workers", 0, "number of worker nodes")
-	cmd.Flags().IntVar(&controlPlanes, "control-plane", 1, "number of control-plane nodes")
-	cmd.Flags().StringVar(&driver, "driver", "kind", "cluster runtime driver (kind or k3d)")
+			defer func() {
+				for _, c := range closers {
+					c.Close()
+				}
+			}()
+			for _, f := range forwards {
+				app.Out.Success("%s -> machine port %d", f.URL, f.RemotePort)
+			}
+			app.Out.Info("Press Ctrl+C to stop forwarding")
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			<-sigCh
+			return nil
+		})
+	}}
+	cmd.Flags().StringArrayVar(&ports, "port", nil, "port mapping (local:remote or just remote)")
+	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "local address to bind")
 	return cmd
 }
 
-func (app *App) clusterListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List Kubernetes clusters",
+func (app *App) projectMachineSnapshotCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "snapshot", Short: "Manage this project's machine snapshots"}
+	cmd.AddCommand(&cobra.Command{Use: "create [SNAPSHOT]", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		name := ""
+		if len(args) > 0 {
+			name = args[0]
+		}
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			return svc.SnapshotCreate(ctx, name)
+		})
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "list", RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			v, err := svc.SnapshotList(ctx)
+			if err != nil {
+				return err
+			}
+			if app.Out.JSON {
+				return app.Out.PrintJSON(v)
+			}
+			for _, x := range v {
+				app.Out.Info("%s", x)
+			}
+			return nil
+		})
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "delete SNAPSHOT", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		return app.withProjectMachineExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project, svc *machine.ProjectService) error {
+			if err := authz.RequireOwner(h, "machine snapshot delete"); err != nil {
+				return err
+			}
+			return svc.SnapshotDelete(ctx, args[0])
+		})
+	}})
+	return cmd
+}
+func (app *App) clusterCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "cluster", Short: "Manage this project's Kubernetes cluster"}
+	cmd.AddCommand(app.projectClusterUpCmd())
+	cmd.AddCommand(app.projectClusterDownCmd())
+	cmd.AddCommand(app.projectClusterEnvCmd())
+	cmd.AddCommand(app.clusterStatusCmd())
+	return cmd
+}
+
+func (app *App) projectClusterUpCmd() *cobra.Command {
+	var driver string
+	cmd := &cobra.Command{
+		Use:   "up",
+		Short: "Create or reuse this project's Kubernetes cluster",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				clusters, err := svc.List(ctx)
-				if err != nil {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				if _, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).SyncIfNeeded(ctx, false); err != nil {
 					return err
 				}
-				if app.Out.JSON {
-					return app.Out.PrintJSON(clusters)
+				svc := cluster.NewProjectService(exec, proj, app.Cwd, app.Out)
+				return svc.Up(ctx, driver)
+			})
+		},
+	}
+	cmd.Flags().StringVar(&driver, "driver", "", "Kubernetes runtime driver (kind or k3d; default kind)")
+	return cmd
+}
+
+func (app *App) projectClusterDownCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "down",
+		Short: "Delete this project's Kubernetes cluster",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				if err := authz.RequireOwner(h, "cluster down"); err != nil {
+					return err
 				}
-				if len(clusters) == 0 {
-					app.Out.Info("No clusters found")
-					return nil
+				count, _ := share.ApprovedCount(ctx, exec)
+				if err := authz.ConfirmDestructive(count, "cluster down", app.ForceYes); err != nil {
+					return err
 				}
-				for _, c := range clusters {
-					app.Out.Info("%s  driver=%s  status=%s  nodes=%d  control=%d  workers=%d",
-						c.Name, c.Driver, c.Status, c.NodeCount, c.ControlPlanes, c.Workers)
+				if !app.ForceYes {
+					if err := authz.ConfirmPrompt("This will delete the project's Kubernetes cluster and its node containers"); err != nil {
+						return err
+					}
 				}
+				if _, err := connect.LoadActiveSession(h.Name, proj.Name); err == nil {
+					if err := connect.StopSession(h.Name, proj.Name); err != nil {
+						return err
+					}
+				}
+				if err := cluster.NewProjectService(exec, proj, app.Cwd, app.Out).Down(ctx); err != nil {
+					return err
+				}
+				app.Out.Success("Deleted project Kubernetes cluster")
 				return nil
 			})
 		},
 	}
 }
 
+func (app *App) projectClusterEnvCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "env -- COMMAND [ARGS...]",
+		Short:              "Run a local command with this project's Kubernetes config",
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("command is required")
+			}
+			proj, err := config.LoadProject(app.Cwd)
+			if err != nil {
+				return err
+			}
+			path := cluster.LocalProjectKubeconfigPath(app.Cwd)
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("project kubeconfig is unavailable — run 'outpost open' first")
+			}
+			hostName := app.resolveHostName(proj)
+			sess, err := connect.LoadActiveSession(hostName, proj.Name)
+			if err != nil {
+				return fmt.Errorf("Kubernetes tunnel is not active — run 'outpost open' first")
+			}
+			apiForward := false
+			for _, forward := range sess.Forwards {
+				if forward.Service == "kubernetes" {
+					apiForward = true
+					break
+				}
+			}
+			if !apiForward {
+				return fmt.Errorf("Kubernetes tunnel is not active — run 'outpost open' first")
+			}
+			local := osexec.Command(args[0], args[1:]...)
+			local.Env = make([]string, 0, len(os.Environ())+1)
+			for _, value := range os.Environ() {
+				if !strings.HasPrefix(value, "KUBECONFIG=") {
+					local.Env = append(local.Env, value)
+				}
+			}
+			local.Env = append(local.Env, "KUBECONFIG="+path)
+			local.Stdin, local.Stdout, local.Stderr = os.Stdin, os.Stdout, os.Stderr
+			if err := local.Run(); err != nil {
+				if exitErr, ok := err.(*osexec.ExitError); ok {
+					os.Exit(exitErr.ExitCode())
+				}
+				return err
+			}
+			return nil
+		},
+	}
+	return cmd
+}
 func (app *App) clusterStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status NAME",
-		Short: "Show cluster status",
-		Args:  cobra.ExactArgs(1),
+		Use:   "status",
+		Short: "Show this project's Kubernetes status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				c, err := svc.Status(ctx, args[0])
+			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+				c, err := cluster.NewProjectService(exec, proj, app.Cwd, app.Out).Status(ctx)
 				if err != nil {
 					return err
 				}
 				if app.Out.JSON {
 					return app.Out.PrintJSON(c)
 				}
-				app.Out.Info("Cluster %s: driver=%s status=%s nodes=%d", c.Name, c.Driver, c.Status, c.NodeCount)
+				app.Out.Info("Project Kubernetes: driver=%s status=%s nodes=%d", c.Driver, c.Status, c.NodeCount)
 				return nil
 			})
 		},
 	}
 }
-
-func (app *App) clusterDeleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete NAME",
-		Short: "Delete a Kubernetes cluster",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				if err := authz.RequireOwner(h, "cluster delete"); err != nil {
-					return err
-				}
-				count, _ := share.ApprovedCount(ctx, exec)
-				if err := authz.ConfirmDestructive(count, "cluster delete", app.ForceYes); err != nil {
-					return err
-				}
-				if !app.ForceYes {
-					if err := authz.ConfirmPrompt("This will delete the Kubernetes cluster and its node containers"); err != nil {
-						return err
-					}
-				}
-				if err := svc.Delete(ctx, args[0]); err != nil {
-					return err
-				}
-				app.Out.Success("Deleted cluster %q", args[0])
-				return nil
-			})
-		},
-	}
-}
-
-func (app *App) kubectlCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:                "kubectl [args...]",
-		Short:              "Run kubectl against a remote cluster",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			clusterName, kubectlArgs, err := parseKubectlArgs(args)
-			if err != nil {
-				return err
-			}
-			return app.withClusterExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, svc *cluster.Service) error {
-				_ = svc
-				code, err := cluster.RunKubectl(ctx, exec, clusterName, kubectlArgs)
-				if err != nil {
-					return err
-				}
-				if code != 0 {
-					os.Exit(code)
-				}
-				return nil
-			})
-		},
-	}
-	return cmd
-}
-
-func parseKubectlArgs(args []string) (clusterName string, rest []string, err error) {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--cluster" {
-			if i+1 >= len(args) {
-				return "", nil, fmt.Errorf("--cluster requires a value")
-			}
-			clusterName = args[i+1]
-			i++
-			continue
-		}
-		if strings.HasPrefix(a, "--cluster=") {
-			clusterName = strings.TrimPrefix(a, "--cluster=")
-			continue
-		}
-		rest = append(rest, a)
-	}
-	if clusterName == "" {
-		return "", nil, fmt.Errorf("--cluster is required")
-	}
-	return clusterName, rest, nil
-}
-
 func (app *App) diskCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "disk",

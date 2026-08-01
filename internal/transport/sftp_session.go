@@ -94,6 +94,29 @@ func (s *SFTPSession) UploadWithProgress(local, remote string, out io.Writer) er
 	return err
 }
 
+// DownloadWithProgress downloads a remote file through the shared SFTP session.
+func (s *SFTPSession) DownloadWithProgress(remote, local string, out io.Writer) error {
+	src, err := s.client.Open(remote)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
+		return err
+	}
+	dst, err := os.Create(local)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = CopyWithProgress(dst, src, info.Size(), "Downloading from host", out, nil)
+	return err
+}
+
 // HashRemote returns the SHA-256 hex digest of a remote file.
 func (s *SFTPSession) HashRemote(remote string) (string, error) {
 	f, err := s.client.Open(remote)

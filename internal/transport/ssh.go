@@ -207,35 +207,7 @@ func (e *SSHExecutor) RunInteractive(ctx context.Context, cmd string, opts RunOp
 		stderr = os.Stderr
 	}
 
-	fd := int(os.Stdin.Fd())
-	if isTerminal(fd) {
-		if err := requestPTY(session); err != nil {
-			return err
-		}
-	}
-	session.Stdin = stdin
-	session.Stdout = stdout
-	session.Stderr = stderr
-
-	if err := session.Start(cmd); err != nil {
-		return err
-	}
-	errCh := make(chan error, 1)
-	go func() { errCh <- session.Wait() }()
-	select {
-	case err = <-errCh:
-	case <-ctx.Done():
-		_ = session.Close()
-		<-errCh
-		return ctx.Err()
-	}
-	if err == nil {
-		return nil
-	}
-	if exitErr, ok := err.(*ssh.ExitError); ok {
-		return &ExitError{Code: exitErr.ExitStatus()}
-	}
-	return err
+	return runInteractiveSession(ctx, session, cmd, stdin, stdout, stderr)
 }
 
 type ExitError struct {
@@ -244,6 +216,14 @@ type ExitError struct {
 
 func (e *ExitError) Error() string {
 	return fmt.Sprintf("remote command exited with status %d", e.Code)
+}
+
+// ExitStatus returns the remote exit code when err is a transport.ExitError.
+func ExitStatus(err error) (int, bool) {
+	if exitErr, ok := err.(*ExitError); ok {
+		return exitErr.Code, true
+	}
+	return 0, false
 }
 
 func shellQuote(s string) string {

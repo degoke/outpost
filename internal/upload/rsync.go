@@ -66,6 +66,59 @@ func syncRepoRsync(cwd string, proj *config.Project, ssh *transport.SSHExecutor,
 	return nil
 }
 
+func pullRepoRsync(cwd string, proj *config.Project, ssh *transport.SSHExecutor, opts *SyncOpts) error {
+	if _, err := exec.LookPath("rsync"); err != nil {
+		return fmt.Errorf("rsync not found locally — install rsync or pull without rsync")
+	}
+	cfg := ssh.Config()
+	if cfg.AuthMode == transport.AuthPassword && cfg.IdentityFile == "" {
+		return fmt.Errorf("rsync pull requires SSH key authentication (password-only auth is not supported)")
+	}
+
+	ctx := context.Background()
+	code, err := ssh.Run(ctx, "command -v rsync >/dev/null 2>&1", transport.RunOpts{})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("rsync not found on remote host — install rsync or pull without rsync")
+	}
+
+	if opts != nil && opts.Out != nil && !opts.Out.JSON {
+		opts.Out.Step("Pulling changes from remote with rsync...")
+	}
+
+	sshArgs := strings.Join(quoteSSHArgs(ssh.RsyncSSHArgs()), " ")
+	remoteSrc := fmt.Sprintf("%s:%s/", ssh.Destination(), proj.RemoteDir)
+
+	args := []string{
+		"-az",
+	}
+	for _, pattern := range alwaysIgnore {
+		args = append(args, "--exclude", pattern+"/", "--exclude", pattern)
+	}
+	if isGitRepo(cwd) {
+		args = append(args, "--filter", ":- .gitignore")
+	}
+	if HasOutpostIgnoreFile(cwd) {
+		if excludeFrom, ok := OutpostIgnoreExcludeArg(cwd); ok {
+			args = append(args, "--exclude-from", excludeFrom)
+		}
+	}
+	args = append(args, "-e", "ssh "+sshArgs, remoteSrc, cwd+"/")
+
+	cmd := exec.Command("rsync", args...)
+	cmd.Dir = cwd
+	if opts != nil && opts.Out != nil && !opts.Out.JSON {
+		cmd.Stdout = opts.Out.Stderr
+		cmd.Stderr = opts.Out.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rsync pull: %w", err)
+	}
+	return nil
+}
+
 func quoteSSHArgs(args []string) []string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {

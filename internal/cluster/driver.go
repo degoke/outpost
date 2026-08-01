@@ -104,6 +104,24 @@ func deleteCluster(ctx context.Context, exec transport.Executor, driver Driver, 
 	return err
 }
 
+func deleteClusterStrict(ctx context.Context, exec transport.Executor, driver Driver, runtimeName string) error {
+	var cmd string
+	switch driver {
+	case DriverK3d:
+		cmd = fmt.Sprintf("k3d cluster delete %s", shellQuote(runtimeName))
+	default:
+		cmd = fmt.Sprintf("kind delete cluster --name %s", shellQuote(runtimeName))
+	}
+	code, err := exec.Run(ctx, cmd, transport.RunOpts{})
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("%s cluster delete failed (exit %d)", driver, code)
+	}
+	return nil
+}
+
 func fetchKubeconfig(ctx context.Context, exec transport.Executor, driver Driver, runtimeName string) (string, error) {
 	var cmd string
 	switch driver {

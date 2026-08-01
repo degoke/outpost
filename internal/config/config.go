@@ -76,6 +76,31 @@ type Project struct {
 	Volumes      *ProjectVolumeState `yaml:"volumes,omitempty"`
 	Environment  *ProjectEnvironment `yaml:"environment,omitempty"`
 	Cleanup      *ProjectCleanup     `yaml:"cleanup,omitempty"`
+	Kubernetes   *ProjectKubernetes  `yaml:"kubernetes,omitempty"`
+	Machine      *ProjectMachine     `yaml:"machine,omitempty"`
+	AI           *ProjectAI          `yaml:"ai,omitempty"`
+}
+
+// ProjectKubernetes configures the optional project-scoped Kubernetes cluster.
+// The cluster is created by `outpost cluster up` inside the managed project
+// container. Driver is intentionally the only setting for the first version;
+// both drivers use a single control-plane node by default.
+type ProjectKubernetes struct {
+	Driver string `yaml:"driver,omitempty"`
+}
+
+// ProjectMachine configures the optional project-scoped Incus machine.
+type ProjectMachine struct {
+	Image          string  `yaml:"image,omitempty"`
+	CPU            float64 `yaml:"cpu,omitempty"`
+	Memory         string  `yaml:"memory,omitempty"`
+	Disk           string  `yaml:"disk,omitempty"`
+	VirtualMachine bool    `yaml:"virtual_machine,omitempty"`
+}
+
+// ProjectAI configures the default AI coding agent for outpost ai.
+type ProjectAI struct {
+	Command string `yaml:"command,omitempty"`
 }
 
 // ProjectEnvironment describes the managed remote development container.

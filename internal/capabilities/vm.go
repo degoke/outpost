@@ -42,7 +42,7 @@ func VMSupport(ctx context.Context, exec transport.Executor, providerMeta *confi
 		return &VMSupportReport{
 			Status: "nested_possible",
 			Reason: reason,
-			Remediation: "Use a system container instead: outpost machine create NAME --image ubuntu:24.04\n" +
+			Remediation: "Use a system container instead: outpost machine up --image ubuntu:24.04\n" +
 				"For VMs on AWS, choose a bare-metal instance type (for example *.metal) or enable nested virtualization on a supported instance type.\n" +
 				"On bare metal or a home server, verify KVM with: outpost host capabilities",
 		}, nil
@@ -58,7 +58,7 @@ func VMSupport(ctx context.Context, exec transport.Executor, providerMeta *confi
 	return &VMSupportReport{
 		Status: "unsupported",
 		Reason: reason,
-		Remediation: "Create a lightweight system container instead: outpost machine create NAME --image ubuntu:24.04\n" +
+		Remediation: "Create a lightweight system container instead: outpost machine up --image ubuntu:24.04\n" +
 			"VMs require a host with KVM support and Incus installed.",
 	}, nil
 }

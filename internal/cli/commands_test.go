@@ -45,6 +45,20 @@ func TestCLIInit(t *testing.T) {
 	require.Contains(t, string(data), "name: myapp")
 }
 
+func TestSimplifiedSurfaceOmitsRemovedGroups(t *testing.T) {
+	root, _ := cli.NewWithApp()
+	commands := map[string]bool{}
+	for _, command := range root.Commands() {
+		commands[command.Name()] = true
+	}
+	for _, removed := range []string{"mirror", "connect", "up", "down", "logs"} {
+		require.False(t, commands[removed], "removed command %q is still public", removed)
+	}
+	for _, current := range []string{"app", "compose", "cluster", "machine", "open", "close", "ai"} {
+		require.True(t, commands[current], "current command %q is missing", current)
+	}
+}
+
 func TestCLIReset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -107,17 +121,10 @@ func TestCLICommands(t *testing.T) {
 		{name: "docker ps", args: []string{"docker", "ps"}},
 		{name: "compose ps", args: []string{"compose", "ps"}},
 		{name: "compose volumes list", args: []string{"compose", "volumes", "list"}},
-		{name: "mirror sync", args: []string{"mirror", "sync"}},
-		{name: "mirror run no-sync", args: []string{"mirror", "run", "--no-sync", "--", "echo", "hello"}},
-		{name: "mirror toolchain plan", args: []string{"mirror", "toolchain", "plan"}},
-		{name: "mirror sessions list", args: []string{"mirror", "sessions", "list"}},
-		{name: "connect status", args: []string{"connect", "--status"}},
-		{name: "connect down no session", args: []string{"connect", "--down"}, wantErr: true},
+		{name: "close no session", args: []string{"close"}, wantErr: true},
+		{name: "migrate dry-run", args: []string{"migrate", "--to", "staging", "--dry-run", "--yes"}},
 		{name: "invite list", args: []string{"invite", "list"}},
 		{name: "invite create", args: []string{"invite", "create"}},
-		{name: "cluster list", args: []string{"cluster", "list"}},
-		{name: "machine list", args: []string{"machine", "list"}},
-		{name: "kubectl get nodes", args: []string{"kubectl", "--cluster", "dev", "get", "nodes"}},
 		{name: "prune dry-run", args: []string{"prune", "--dry-run"}},
 
 		// Commands that require cloud credentials or real SSH — expect failure, not a hang.
@@ -145,96 +152,81 @@ func TestCLICommands(t *testing.T) {
 
 // untestableCLICommands documents commands that need real SSH, AWS, or block indefinitely.
 var untestableCLICommands = map[string]string{
-	"host add":                 "requires real SSH to verify the host",
-	"host verify":              "opens a real SSH connection",
-	"host start":               "requires AWS EC2 API",
-	"host stop":                "requires AWS EC2 API",
-	"host restart":             "requires AWS EC2 API",
-	"host resize":              "requires AWS EC2 API",
-	"host update-ssh-access":   "requires AWS EC2 API",
-	"mirror watch":             "blocks until interrupted",
-	"mirror shell":             "interactive TTY session",
-	"mirror setup-python":      "long-running remote venv bootstrap",
-	"mirror setup-toolchain":   "may install apt packages and Go on remote host",
-	"connect":                  "spawns a background port-forward worker by default",
-	"top --watch":              "blocks until interrupted",
-	"compose up":               "upload + capacity checks + long-running deploy",
-	"compose down":             "destructive without dry-run guard in smoke tests",
-	"compose build":            "upload + remote image build",
-	"compose pull":             "upload + remote image pull",
-	"compose logs":             "may stream indefinitely",
-	"compose exec":             "interactive session",
-	"cluster create":           "provisions Kubernetes cluster on remote host (kind or k3d)",
-	"cluster delete":           "destructive cluster removal",
-	"cluster status":           "requires an existing cluster name",
-	"machine create":           "provisions Incus instance",
-	"machine status":           "requires an existing machine name",
-	"machine start":            "requires an existing machine name",
-	"machine stop":             "requires an existing machine name",
-	"machine restart":          "requires an existing machine name",
-	"machine shell":            "interactive Incus shell",
-	"machine exec":             "interactive Incus exec",
-	"machine connect":          "SSH port forward to machine",
-	"machine copy":             "file copy to/from machine",
-	"machine snapshot create":  "requires existing machine",
-	"machine snapshot list":    "requires existing machine",
-	"machine snapshot restore": "requires existing snapshot",
-	"machine snapshot delete":  "destructive snapshot removal",
-	"machine delete":           "destructive machine removal",
-	"compose volumes export":   "creates local archives from remote volumes",
-	"compose volumes import":   "restores remote volumes from archives",
-	"invite join":              "requires SSH registration unless fully mocked join flow",
-	"invite approve":           "requires pending device in manifest",
-	"invite revoke":            "requires existing device id",
-	"mirror sessions status":   "requires existing session name",
-	"mirror sessions logs":     "requires existing session name",
-	"mirror sessions attach":   "interactive tmux attach",
-	"mirror sessions kill":     "destructive session kill",
-	"prune":                    "destructive without --dry-run",
-	"prune volumes":            "destructive volume removal",
-	"prune clusters":           "destructive cluster removal",
-	"prune machines":           "destructive machine removal",
-	"shell":                    "interactive remote development container",
-	"run":                      "executes a command in the remote development container",
-	"up":                       "uploads and starts the remote Compose project",
-	"down":                     "destructive remote Compose shutdown",
-	"logs":                     "may stream indefinitely",
-	"open":                     "starts background port forwarding",
-	"cleanup":                  "requires remote host cleanup execution",
+	"host add":                "requires real SSH to verify the host",
+	"host verify":             "opens a real SSH connection",
+	"host start":              "requires AWS EC2 API",
+	"host stop":               "requires AWS EC2 API",
+	"host restart":            "requires AWS EC2 API",
+	"host resize":             "requires AWS EC2 API",
+	"host update-ssh-access":  "requires AWS EC2 API",
+	"top --watch":             "blocks until interrupted",
+	"compose up":              "upload + capacity checks + long-running deploy",
+	"compose down":            "destructive without dry-run guard in smoke tests",
+	"compose build":           "upload + remote image build",
+	"compose pull":            "upload + remote image pull",
+	"compose logs":            "may stream indefinitely",
+	"compose exec":            "interactive session",
+	"app build":               "builds the project Dockerfile image",
+	"app run":                 "runs the project Dockerfile application",
+	"app stop":                "stops the project application",
+	"app logs":                "may stream indefinitely",
+	"app status":              "requires an existing application container",
+	"cluster up":              "provisions the project Kubernetes container and cluster",
+	"cluster down":            "destructive project Kubernetes cluster removal",
+	"cluster env":             "runs an arbitrary local command with a live project tunnel",
+	"cluster status":          "requires a project and remote Kubernetes status",
+	"machine up":              "provisions the project Incus machine",
+	"machine down":            "destructive project machine removal",
+	"machine status":          "requires a project machine",
+	"machine shell":           "interactive project machine shell",
+	"machine exec":            "runs a command in the project machine",
+	"machine copy":            "copies files to or from the project machine",
+	"machine connect":         "forwards ports from the project machine",
+	"machine snapshot create": "creates a project machine snapshot",
+	"machine snapshot list":   "lists project machine snapshots",
+	"machine snapshot delete": "destructive snapshot removal",
+	"compose volumes export":  "creates local archives from remote volumes",
+	"compose volumes import":  "restores remote volumes from archives",
+	"invite join":             "requires SSH registration unless fully mocked join flow",
+	"invite approve":          "requires pending device in manifest",
+	"invite revoke":           "requires existing device id",
+	"prune":                   "destructive without --dry-run",
+	"prune volumes":           "destructive volume removal",
+	"prune clusters":          "destructive cluster removal",
+	"prune machines":          "destructive machine removal",
+	"shell":                   "interactive remote development container",
+	"ai":                      "interactive remote AI agent session",
+	"run":                     "executes a command in the remote development container",
+	"open":                    "starts background port forwarding",
+	"cleanup":                 "requires remote host cleanup execution",
+	"migrate":                 "migrates project environment between hosts",
 }
 
 func TestCLICommandCoverage(t *testing.T) {
 	root, _ := cli.NewWithApp()
 	tested := map[string]bool{
-		"host list":             true,
-		"host use":              true,
-		"use":                   true,
-		"host remove":           true,
-		"host capabilities":     true,
-		"host create":           true, // error-path smoke test
-		"host destroy":          true,
-		"provider login":        true,
-		"init":                  true,
-		"reset":                 true,
-		"status":                true,
-		"top":                   true,
-		"capacity":              true,
-		"disk":                  true,
-		"docker":                true, // exercised via docker ps
-		"compose ps":            true,
-		"compose volumes list":  true,
-		"mirror sync":           true,
-		"mirror run":            true,
-		"mirror toolchain plan": true,
-		"mirror sessions list":  true,
-		"connect":               true, // --status / --down variants
-		"invite list":           true,
-		"invite create":         true,
-		"invite join":           true, // error-path smoke test
-		"cluster list":          true,
-		"machine list":          true,
-		"kubectl":               true,
-		"prune":                 true, // --dry-run
+		"host list":            true,
+		"host use":             true,
+		"use":                  true,
+		"host remove":          true,
+		"host capabilities":    true,
+		"host create":          true, // error-path smoke test
+		"host destroy":         true,
+		"provider login":       true,
+		"init":                 true,
+		"reset":                true,
+		"status":               true,
+		"top":                  true,
+		"capacity":             true,
+		"disk":                 true,
+		"docker":               true, // exercised via docker ps
+		"compose ps":           true,
+		"compose volumes list": true,
+		"invite list":          true,
+		"invite create":        true,
+		"invite join":          true, // error-path smoke test
+		"prune":                true, // --dry-run
+		"close":                true, // error-path smoke test
 	}
 
 	all := collectRunnableCommands(root, nil)
@@ -248,6 +240,35 @@ func TestCLICommandCoverage(t *testing.T) {
 	if len(missing) > 0 {
 		t.Fatalf("unclassified CLI commands (add a smoke test or document in untestableCLICommands): %s", strings.Join(missing, ", "))
 	}
+}
+
+func TestOpenCommandExposesPortFlags(t *testing.T) {
+	root, _ := cli.NewWithApp()
+	open := findSubcommand(root, "open")
+	require.NotNil(t, open)
+	require.NotNil(t, open.Flags().Lookup("port"))
+	require.NotNil(t, open.Flags().Lookup("local-port"))
+	require.NotNil(t, open.Flags().Lookup("service"))
+}
+
+func TestAICommandExposesFlags(t *testing.T) {
+	root, _ := cli.NewWithApp()
+	ai := findSubcommand(root, "ai")
+	require.NotNil(t, ai)
+	require.NotNil(t, ai.Flags().Lookup("command"))
+	require.NotNil(t, ai.Flags().Lookup("no-pull"))
+}
+
+func findSubcommand(cmd *cobra.Command, name string) *cobra.Command {
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == name {
+			return sub
+		}
+		if found := findSubcommand(sub, name); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 func collectRunnableCommands(cmd *cobra.Command, prefix []string) map[string]bool {

@@ -100,7 +100,7 @@ func (s *Service) copyToMachine(ctx context.Context, localPath, machineName, rem
 		return err
 	}
 
-	stagingDir := RemoteDir(machineName) + "/.outpost/staging"
+	stagingDir := s.machineRemoteDir(machineName) + "/.outpost/staging"
 	if err := transport.EnsureRemoteDir(s.Exec, stagingDir); err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (s *Service) copyFromMachine(ctx context.Context, machineName, remotePath, 
 	if err != nil {
 		return err
 	}
-	stagingDir := RemoteDir(machineName) + "/.outpost/staging"
+	stagingDir := s.machineRemoteDir(machineName) + "/.outpost/staging"
 	if err := transport.EnsureRemoteDir(s.Exec, stagingDir); err != nil {
 		return err
 	}

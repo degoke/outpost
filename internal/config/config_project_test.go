@@ -54,3 +54,33 @@ func TestProjectToolchainAutoDisabled(t *testing.T) {
 	p := &config.Project{Toolchain: &config.ProjectToolchain{Auto: &auto}}
 	require.False(t, p.ToolchainAuto())
 }
+
+func TestProjectKubernetesYAML(t *testing.T) {
+	data := []byte(`
+version: 1
+name: demo
+remote_dir: /var/lib/outpost/projects/demo
+compose_files: []
+kubernetes:
+  driver: k3d
+`)
+	var p config.Project
+	require.NoError(t, yaml.Unmarshal(data, &p))
+	require.NotNil(t, p.Kubernetes)
+	require.Equal(t, "k3d", p.Kubernetes.Driver)
+}
+
+func TestProjectAIYAML(t *testing.T) {
+	data := []byte(`
+version: 1
+name: demo
+remote_dir: /var/lib/outpost/projects/demo
+compose_files: []
+ai:
+  command: claude
+`)
+	var p config.Project
+	require.NoError(t, yaml.Unmarshal(data, &p))
+	require.NotNil(t, p.AI)
+	require.Equal(t, "claude", p.AI.Command)
+}

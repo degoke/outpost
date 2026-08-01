@@ -68,7 +68,7 @@ func (r *Runner) logSyncSkip(reason SyncSkipReason) {
 		return
 	}
 	if msg := skipReasonMessage(reason); msg != "" {
-		r.Out.Step(msg)
+		r.Out.Step("%s", msg)
 	}
 }
 

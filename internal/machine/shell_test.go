@@ -24,7 +24,7 @@ type: container
 	require.True(t, exec.HasCommand("incus exec 'outpost-dev' -- 'uname' '-a'"))
 }
 
-func TestShellUsesInteractiveTTY(t *testing.T) {
+func TestShellUsesInteractiveExec(t *testing.T) {
 	exec := mock.New()
 	exec.Files["/var/lib/outpost/machines/dev/meta.yaml"] = []byte(`name: dev
 incus_name: outpost-dev
@@ -36,7 +36,7 @@ type: container
 	svc := &machine.Service{Exec: exec}
 	err := svc.Shell(context.Background(), "dev")
 	require.NoError(t, err)
-	require.True(t, exec.HasCommand("incus exec -t 'outpost-dev' -- bash"))
+	require.True(t, exec.HasCommand("incus exec 'outpost-dev' -- bash"))
 }
 
 func TestCreateRejectsMissingImage(t *testing.T) {

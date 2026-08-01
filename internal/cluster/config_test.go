@@ -23,6 +23,9 @@ func TestKindNamePrefix(t *testing.T) {
 func TestRenderKindConfigSingleNode(t *testing.T) {
 	cfg := cluster.RenderKindConfig(cluster.KindConfig{Name: "outpost-demo", ControlPlanes: 1})
 	require.Contains(t, cfg, "name: outpost-demo")
+	require.Contains(t, cfg, "apiServerAddress: 0.0.0.0")
+	require.Contains(t, cfg, "host.docker.internal")
+	require.Contains(t, cfg, "127.0.0.1")
 	require.Contains(t, cfg, "role: control-plane")
 	require.NotContains(t, cfg, "role: worker")
 }

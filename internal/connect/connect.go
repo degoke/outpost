@@ -187,6 +187,32 @@ func CheckLocalPort(host string, port int) error {
 	return nil
 }
 
+// AvailablePort returns preferred when it is free, otherwise an ephemeral
+// loopback port. It is used for internal forwards such as the Kubernetes API
+// where the local port must not collide with an application port.
+func AvailablePort(host string, preferred int) (int, error) {
+	if preferred > 0 && CheckLocalPort(host, preferred) == nil {
+		return preferred, nil
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:0", host))
+	if err != nil {
+		return 0, fmt.Errorf("choose local port: %w", err)
+	}
+	defer ln.Close()
+	_, portText, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		return 0, err
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return 0, err
+	}
+	return port, nil
+}
+
 func IsProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -219,7 +245,7 @@ func EnsureNoActiveSession(host, project string) error {
 		return nil
 	}
 	if IsProcessAlive(sess.PID) {
-		return fmt.Errorf("forwarding session already active for %s/%s — run 'outpost connect --down' first", host, project)
+		return fmt.Errorf("forwarding session already active for %s/%s — run 'outpost close' first", host, project)
 	}
 	_ = RemoveSession(host, project)
 	return nil

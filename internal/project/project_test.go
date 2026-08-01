@@ -66,6 +66,20 @@ func TestInitCreatesOutpostIgnore(t *testing.T) {
 	require.NoError(t, err)
 	_, err = os.Stat(config.OutpostIgnorePath(dir))
 	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(dir, ".outpost", ".gitignore"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "kubeconfig")
+}
+
+func TestInitExcludesRuntimeKubeconfigFromGit(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git", "info"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services: {}"), 0644))
+	_, err := project.Init(dir, "", "", false, false)
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	require.NoError(t, err)
+	require.Contains(t, string(data), ".outpost/kubeconfig")
 }
 
 func TestDeriveNameExplicit(t *testing.T) {

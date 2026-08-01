@@ -16,10 +16,10 @@ func (r *Runner) Shell(ctx context.Context) error {
 			return err
 		}
 		stopWatch, watchDone := r.startBackgroundWatch(ctx)
-		defer stopWatch()
 		err := environment.New(r.Exec, r.Proj, r.Cwd).Shell(ctx, transport.RunOpts{
 			Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		})
+		stopWatch()
 		if watchErr := <-watchDone; err == nil && watchErr != nil {
 			return watchErr
 		}
@@ -71,12 +71,9 @@ func (r *Runner) Shell(ctx context.Context) error {
 		Stderr:  os.Stderr,
 	}
 	stopWatch, watchDone := r.startBackgroundWatch(ctx)
-	defer stopWatch()
 	err = r.Exec.RunInteractive(ctx, cmd, opts)
+	stopWatch()
 	watchErr := <-watchDone
-	if exitErr, ok := err.(*transport.ExitError); ok {
-		os.Exit(exitErr.Code)
-	}
 	if err == nil && watchErr != nil {
 		return watchErr
 	}

@@ -88,6 +88,9 @@ func (r *Runner) Run(ctx context.Context, subcommand string, args []string, uplo
 			return 1, err
 		}
 	}
+	if wantsInteractive(subcommand, args) {
+		args = transport.StripChildTTY(args)
+	}
 	cmd := r.buildCmd(subcommand, args)
 	opts := transport.RunOpts{
 		WorkDir: r.Project.RemoteDir,

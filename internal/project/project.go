@@ -81,6 +81,8 @@ func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Proje
 		p.Toolchain = existing.Toolchain
 		p.Environment = existing.Environment
 		p.Cleanup = existing.Cleanup
+		p.Kubernetes = existing.Kubernetes
+		p.Machine = existing.Machine
 		if host == "" {
 			p.Host = existing.Host
 		}
@@ -104,6 +106,9 @@ func Init(cwd, name, host string, writeGitignore, noCompose bool) (*config.Proje
 	}
 
 	if err := ensureOutpostIgnore(cwd); err != nil {
+		return nil, err
+	}
+	if err := ensureLocalRuntimeExclude(cwd); err != nil {
 		return nil, err
 	}
 
@@ -148,11 +153,55 @@ dist/
 func ensureOutpostIgnore(cwd string) error {
 	path := config.OutpostIgnorePath(cwd)
 	if _, err := os.Stat(path); err == nil {
-		return nil
+		return ensureRuntimeGitignore(cwd)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.WriteFile(path, []byte(defaultOutpostIgnore), 0644)
+	if err := os.WriteFile(path, []byte(defaultOutpostIgnore), 0644); err != nil {
+		return err
+	}
+	return ensureRuntimeGitignore(cwd)
+}
+
+func ensureRuntimeGitignore(cwd string) error {
+	path := filepath.Join(cwd, ".outpost", ".gitignore")
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if strings.Contains(string(data), "kubeconfig") && strings.Contains(string(data), "*.lock") {
+			return nil
+		}
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			data = append(data, '\n')
+		}
+		data = append(data, []byte("# Local Outpost runtime credentials and locks\nkubeconfig\n*.lock\n")...)
+		return os.WriteFile(path, data, 0644)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte("# Local Outpost runtime credentials and locks\nkubeconfig\n*.lock\n"), 0644)
+}
+
+func ensureLocalRuntimeExclude(cwd string) error {
+	info, err := os.Stat(filepath.Join(cwd, ".git"))
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	path := filepath.Join(cwd, ".git", "info", "exclude")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if strings.Contains(string(data), ".outpost/kubeconfig") {
+		return nil
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		data = append(data, '\n')
+	}
+	data = append(data, []byte("# Outpost project runtime credentials\n.outpost/kubeconfig\n")...)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func appendGitignore(cwd string) error {

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -229,6 +230,12 @@ func (m *Manager) workdir() string {
 	return defaultWorkdir
 }
 
+// Workdir returns the path where the remote project is mounted inside the
+// managed development container.
+func (m *Manager) Workdir() string {
+	return m.workdir()
+}
+
 func (m *Manager) socketEnabled() bool {
 	return m.Project.Environment == nil || m.Project.Environment.DockerSocket == nil || *m.Project.Environment.DockerSocket
 }
@@ -240,6 +247,18 @@ func quote(s string) string {
 func (m *Manager) exists(ctx context.Context) (bool, error) {
 	code, err := m.Exec.Run(ctx, fmt.Sprintf("docker inspect %s >/dev/null 2>&1", quote(m.Name())), transport.RunOpts{})
 	return code == 0, err
+}
+
+func (m *Manager) hasHostGateway(ctx context.Context) (bool, error) {
+	var out strings.Builder
+	code, err := m.Exec.Run(ctx, fmt.Sprintf("docker inspect --format '{{json .HostConfig.ExtraHosts}}' %s", quote(m.Name())), transport.RunOpts{Stdout: &out})
+	if err != nil {
+		return false, err
+	}
+	if code != 0 {
+		return false, fmt.Errorf("could not inspect development container %q", m.Name())
+	}
+	return strings.Contains(out.String(), "host.docker.internal"), nil
 }
 
 // Ensure starts the project container and returns its name.
@@ -259,6 +278,26 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if exists && m.Project.Kubernetes != nil {
+		gateway, err := m.hasHostGateway(ctx)
+		if err != nil {
+			return err
+		}
+		if !gateway {
+			// ExtraHosts cannot be added to an existing Docker container. The
+			// project directory and dependency volumes are persistent, so
+			// recreating this managed development container is safe and makes
+			// upgrading an existing project deterministic.
+			code, err := m.Exec.Run(ctx, fmt.Sprintf("docker rm -f %s", quote(m.Name())), transport.RunOpts{})
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				return fmt.Errorf("could not recreate development container %q with Kubernetes host gateway", m.Name())
+			}
+			exists = false
+		}
+	}
 	if exists {
 		code, err := m.Exec.Run(ctx, fmt.Sprintf("docker start %s >/dev/null", quote(m.Name())), transport.RunOpts{})
 		if err != nil {
@@ -267,7 +306,7 @@ func (m *Manager) Ensure(ctx context.Context) error {
 		if code != 0 {
 			return fmt.Errorf("could not start development container %q", m.Name())
 		}
-		return nil
+		return m.ensureShellBootstrap(ctx)
 	}
 	if err := m.buildImage(ctx); err != nil {
 		return err
@@ -279,6 +318,11 @@ func (m *Manager) Ensure(ctx context.Context) error {
 		"--label", quote("com.outpost.project=" + m.Project.Name),
 		"--workdir", quote(m.workdir()),
 		"--volume", quote(m.Project.RemoteDir + ":" + m.workdir()),
+		"--env", quote("TERM=xterm-256color"),
+		"--env", quote("COLORTERM=truecolor"),
+	}
+	if m.Project.Kubernetes != nil {
+		args = append(args, "--add-host", quote("host.docker.internal:host-gateway"))
 	}
 	if m.socketEnabled() {
 		args = append(args, "--volume", quote("/var/run/docker.sock:/var/run/docker.sock"))
@@ -306,7 +350,7 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	if code != 0 {
 		return fmt.Errorf("could not create development container %q", m.Name())
 	}
-	return nil
+	return m.ensureShellBootstrap(ctx)
 }
 
 func (m *Manager) defaultDependencyVolumes() []string {
@@ -362,6 +406,7 @@ func (m *Manager) buildAutoToolchainImage(ctx context.Context) error {
 		dockerfile.WriteString("python3 python3-pip python3-venv ")
 	}
 	dockerfile.WriteString("&& rm -rf /var/lib/apt/lists/*\n")
+	dockerfile.WriteString(shellBootstrapDockerfile())
 	if m.autoToolchain.Go != "" {
 		goImage := "golang:" + m.autoToolchain.Go + "-bookworm"
 		dockerfile.WriteString("COPY --from=" + goImage + " /usr/local/go /usr/local/go\n")
@@ -404,7 +449,7 @@ func (m *Manager) Shell(ctx context.Context, opts transport.RunOpts) error {
 		return err
 	}
 	inner := fmt.Sprintf("cd %s && if [ -f .venv/bin/activate ]; then . .venv/bin/activate; fi; exec %s", quote(m.workdir()), m.shell())
-	cmd := fmt.Sprintf("docker exec -it %s %s -lc %s", quote(m.Name()), quote(m.shell()), quote(inner))
+	cmd := dockerExecInteractive(m.Name(), m.shell(), inner)
 	return m.Exec.RunInteractive(ctx, cmd, opts)
 }
 
@@ -412,8 +457,75 @@ func (m *Manager) ExecInteractiveCommand(ctx context.Context, command string, op
 	if err := m.Ensure(ctx); err != nil {
 		return err
 	}
-	cmd := fmt.Sprintf("docker exec -it %s %s -lc %s", quote(m.Name()), quote(m.shell()), quote(command))
+	cmd := dockerExecInteractive(m.Name(), m.shell(), command)
 	return m.Exec.RunInteractive(ctx, cmd, opts)
+}
+
+// dockerExecInteractive runs a command in the managed container without
+// allocating a second TTY. The SSH session already owns the terminal.
+func dockerExecInteractive(name, shell, inner string) string {
+	return fmt.Sprintf(
+		"docker exec -i -e TERM=xterm-256color -e COLORTERM=truecolor %s %s -lc %s",
+		quote(name), quote(shell), quote(inner),
+	)
+}
+
+// shellBootstrapDockerfile returns Dockerfile lines that install starship and
+// enable a colored interactive shell in auto-built development images.
+func shellBootstrapDockerfile() string {
+	return `RUN curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin \
+ && printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc
+`
+}
+
+// ensureShellBootstrap installs starship and shell defaults in pre-built or
+// custom development images that were not built with shellBootstrapDockerfile.
+func (m *Manager) ensureShellBootstrap(ctx context.Context) error {
+	cmd := fmt.Sprintf("docker exec %s bash -lc %s", quote(m.Name()), quote(shellBootstrapScript()))
+	_, _ = m.Exec.Run(ctx, cmd, transport.RunOpts{})
+	return nil
+}
+
+func shellBootstrapScript() string {
+	return `if command -v starship >/dev/null 2>&1; then exit 0; fi
+curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
+grep -q 'starship init bash' /etc/bash.bashrc 2>/dev/null || printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc`
+}
+
+// ContainerExecutor exposes the managed project container as a transport
+// executor. Commands run through docker exec; file transfers and network
+// forwards continue to use the underlying remote host executor.
+type ContainerExecutor struct {
+	Host    transport.Executor
+	Manager *Manager
+}
+
+func (e *ContainerExecutor) Run(ctx context.Context, cmd string, opts transport.RunOpts) (int, error) {
+	return e.Manager.ExecCommand(ctx, cmd, opts)
+}
+
+func (e *ContainerExecutor) RunInteractive(ctx context.Context, cmd string, opts transport.RunOpts) error {
+	return e.Manager.ExecInteractiveCommand(ctx, cmd, opts)
+}
+
+func (e *ContainerExecutor) Upload(local, remote string) error {
+	return e.Host.Upload(local, remote)
+}
+
+func (e *ContainerExecutor) UploadBytes(data []byte, remote string) error {
+	return e.Host.UploadBytes(data, remote)
+}
+
+func (e *ContainerExecutor) Download(remote string) ([]byte, error) {
+	return e.Host.Download(remote)
+}
+
+func (e *ContainerExecutor) Forward(ctx context.Context, spec transport.ForwardSpec) (io.Closer, error) {
+	return e.Host.Forward(ctx, spec)
+}
+
+func (e *ContainerExecutor) HostInfo() string {
+	return e.Host.HostInfo()
 }
 
 func (m *Manager) Stop(ctx context.Context, remove bool) error {

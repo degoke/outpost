@@ -137,7 +137,7 @@ func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (
 	if code, err := r.Exec.Run(ctx, hasCmd, transport.RunOpts{}); err != nil {
 		return RunResult{ExitCode: 1}, err
 	} else if code == 0 {
-		return RunResult{ExitCode: 1}, fmt.Errorf("session %q already exists — choose another name or run 'outpost mirror sessions kill %s'", shortName, shortName)
+		return RunResult{ExitCode: 1}, fmt.Errorf("session %q already exists — choose another name or clean up the existing session", shortName)
 	}
 
 	sessionsDir := remoteSessionsDir(r.Proj)

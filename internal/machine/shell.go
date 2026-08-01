@@ -23,7 +23,7 @@ func (s *Service) Shell(ctx context.Context, name string) error {
 	if code != 0 {
 		shell = "sh"
 	}
-	cmd, err := s.incusCommand(ctx, fmt.Sprintf("exec -t %s -- %s", shellQuote(incusName), shell))
+	cmd, err := s.incusCommand(ctx, fmt.Sprintf("exec %s -- %s", shellQuote(incusName), shell))
 	if err != nil {
 		return err
 	}
@@ -33,9 +33,6 @@ func (s *Service) Shell(ctx context.Context, name string) error {
 		Stderr: os.Stderr,
 	}
 	err = s.Exec.RunInteractive(ctx, cmd, opts)
-	if exitErr, ok := err.(*transport.ExitError); ok {
-		os.Exit(exitErr.Code)
-	}
 	return err
 }
 

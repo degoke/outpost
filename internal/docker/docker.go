@@ -9,6 +9,9 @@ import (
 )
 
 func Run(ctx context.Context, exec transport.Executor, args []string) (int, error) {
+	if wantsInteractive(args) {
+		args = transport.StripChildTTY(args)
+	}
 	quoted := make([]string, len(args))
 	for i, arg := range args {
 		quoted[i] = shellQuoteArg(arg)

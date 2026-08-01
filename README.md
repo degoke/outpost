@@ -8,10 +8,12 @@ Outpost turns a remote Linux host into a shared development environment you cont
 
 Use an existing Linux server or let Outpost provision one on AWS. Share the host with teammates through invitation codes; collaborators get runtime access without your cloud credentials.
 
+**Full documentation:** see the [`docs/`](docs/) folder in this repository, or browse the [online docs](https://github.com/degoke/outpost#docs) (`#docs` on the project site).
+
 ## What you get
 
 - **Remote Docker and Compose** — develop against containers on a shared host, not your laptop.
-- **Kubernetes with kind or k3d** — create named clusters and run `kubectl` remotely.
+- **Project Kubernetes with kind or k3d** — run a remote cluster while your local application uses its project kubeconfig.
 - **Linux machines with Incus** — system containers by default; full VMs when the host supports KVM.
 - **Local port forwarding** — reach remote services at `http://127.0.0.1:8080` from your machine.
 - **Remote development environments** — each project gets a managed container, with rsync-first sync and Dev Container support.
@@ -27,11 +29,11 @@ You install the Outpost CLI locally. It connects to your host over SSH, syncs pr
 Your machine                Remote Linux host
 ─────────────               ─────────────────
 outpost CLI        SSH  →   Docker + Compose + project containers
-~/.outpost/ (global)        kind, k3d + kubectl
-.outpost/ (per repo)        Incus
+.outpost/kubeconfig         kind/k3d inside the project container
+~/.outpost/ (global)        Kubernetes node containers + Incus
 ```
 
-The normal workflow is `outpost init`, `outpost shell`, `outpost run`, `outpost up`, and `outpost open`. `init` syncs the repository, creates the managed project container, and opens a shell; the other commands reuse that environment.
+The normal workflow is `outpost init`, `outpost shell`, `outpost ai`, `outpost run`, `outpost compose up`, and `outpost open`. `init` writes project metadata first; sync, the managed container, and an interactive shell happen when you run `shell`, `ai`, `run`, `compose up`, or when `init` opens a shell in an interactive terminal (use `--no-shell` to skip).
 
 ## Install
 
@@ -87,15 +89,18 @@ outpost host add personal --hostname 203.0.113.10 --user ubuntu --auth key --ide
 # 2. Re-verify later if needed
 outpost host verify
 
-# 3. Initialize the project (in a repo with docker-compose.yml or .devcontainer/)
+# 3. Initialize the project (Compose and .devcontainer/ are optional)
 outpost init
+# Or for CI/scripts:
+outpost init --no-shell
 
 # 4. Re-enter the project shell later
 outpost shell
 
 # 5. Start services and forward ports when needed
-outpost up
+outpost compose up
 outpost open
+outpost close
 ```
 
 Your services are now available on localhost — for example `http://127.0.0.1:8080` if that port is published in compose.
@@ -108,7 +113,7 @@ outpost host create personal --provider aws --region eu-west-1
 outpost host verify
 
 outpost init
-outpost up
+outpost compose up
 outpost open
 ```
 
@@ -139,7 +144,7 @@ When you run `outpost init`, Outpost creates a `.outpost/` directory at the root
 
 | File | Purpose |
 |------|---------|
-| `project.yaml` | Stable project name, optional host override, compose file list, environment settings, and remote directory path |
+| `project.yaml` | Stable project name, optional host override, Compose/environment settings, Kubernetes driver, machine settings, and remote directory path |
 | `.outpostignore` | Patterns for files/folders to exclude from sync (same syntax as `.gitignore`) |
 
 **Should you commit it?** By default, yes — commit `.outpost/` so teammates use the same project name and land in the same remote directory. If you prefer per-developer settings, run `outpost init --write-gitignore` to keep `.outpost/` out of git.
@@ -158,14 +163,21 @@ This is separate from `~/.outpost/` on your machine, which stores global CLI sta
 ```bash
 outpost init --name my-api           # set a stable name (defaults to repo folder name)
 outpost init --write-gitignore       # keep .outpost/ local instead of committing it
+outpost init --no-shell              # metadata only (CI and automation)
+outpost init --no-compose            # script-only or Dockerfile-only repos
 
 outpost shell
 outpost run -- npm test
-outpost up
+outpost compose up
+outpost app build
+outpost app run --detach --port 8080:8080
+outpost app status
+outpost app logs -f
+outpost app stop
 outpost status
-outpost logs -f
+outpost compose logs -f
 outpost open
-outpost down
+outpost compose down
 outpost cleanup
 
 outpost docker ps
@@ -192,9 +204,30 @@ Each project gets one managed development container on the host. Source files sy
 
 For Python projects, `outpost run` automatically creates and uses a remote `.venv`. For Go, make, and other build tools, `outpost run` auto-installs the toolchain in the environment. Set `environment.enabled: false` in `.outpost/project.yaml` to opt out of the managed container and execute directly on the host.
 
-### Moving volumes between hosts
+### Dockerfile applications
 
-Named Docker volumes (for example Postgres data) stay on the host they were created on. Outpost can archive them locally and restore them on another host.
+For a repository with a `Dockerfile` but no Compose file, use the project application commands:
+
+```bash
+outpost init --no-compose
+outpost app build
+outpost app run --detach --port 8080:8080
+outpost app logs -f
+outpost app stop
+```
+
+`outpost run -- COMMAND` remains for development commands inside the managed project environment. `outpost app run` runs the image built from the repository Dockerfile.
+
+### Moving projects and volumes between hosts
+
+**Full migration** (containers, volumes, Kubernetes state, optional Incus machine, project metadata):
+
+```bash
+outpost migrate --from old-host --to new-host
+outpost migrate --from old-host --to new-host --dry-run
+```
+
+**Granular volume migration** — named Docker volumes stay on the host they were created on. Outpost can archive them locally and restore them on another host.
 
 ```bash
 # On the old host: save volumes to ~/.outpost/archives/{project}/
@@ -207,7 +240,7 @@ outpost compose volumes import
 outpost compose volumes list
 ```
 
-When you run `outpost up`, Outpost automatically offers to import missing or empty volumes that have local archives. Use `--yes` to skip the prompt.
+When you run `outpost compose up`, Outpost automatically offers to import missing or empty volumes that have local archives. Use `--yes` to skip the prompt.
 
 To move a project:
 
@@ -218,7 +251,7 @@ outpost compose volumes export
 # point the project at the new host in .outpost/project.yaml, then:
 outpost host use new-host
 outpost compose volumes import
-outpost up
+outpost compose up
 ```
 
 
@@ -226,11 +259,14 @@ outpost up
 ### Port forwarding
 
 ```bash
-outpost open                         # forward/display project ports
-outpost open --port 9090:80          # custom mapping
+outpost open                         # discover and forward project ports
+outpost open --port 9090:80          # forward a specific mapping
+outpost open --local-port 3000       # bind a single service locally
+outpost open --service web           # discover ports for one Compose service
+outpost close                        # stop project port forwarding
 ```
 
-**Port already in use?** Stop the local process on that port, or override with `--local-port 18080` or `--port 9090:80`.
+**Port already in use?** Stop the local process on that port, or adjust port mappings in your Compose or service configuration.
 
 ## Sharing with your team
 
@@ -247,15 +283,15 @@ outpost invite revoke DEVICE_ID
 outpost invite join CODE --hostname 203.0.113.10 --user ubuntu --label my-laptop
 ```
 
-Members can run workloads (`docker`, `compose`, `connect`, `kubectl`, etc.) but cannot create or destroy hosts, manage invitations, or use cloud provider commands. Destructive operations warn when other teammates may be affected.
+Members can run workloads (`docker`, `compose`, and runtime inspection commands) but cannot initialize projects, open port forwarding, migrate hosts, or manage infrastructure. Destructive operations warn when other teammates may be affected.
 
-
-| Members can                                  | Members cannot                                  |
-| -------------------------------------------- | ----------------------------------------------- |
-| `docker`, `compose`, `connect`               | Manage hosts or invitations                     |
-| `status`, `top`, `capacity`, `disk`, `prune` | `init`, `host create/destroy`, `provider login` |
-| `cluster list`, `kubectl`                    | `cluster create/delete`                         |
-| `machine shell`, `machine exec`, `machine copy`, `machine connect` | `machine create/delete`                         |
+| Members can | Members cannot |
+| ----------- | -------------- |
+| `docker`, `compose` | `init`, `shell`, `run`, `open`, `close`, `migrate`, `cleanup`, `app` |
+| `status`, `top`, `capacity`, `disk`, `prune` (not `prune clusters` / `prune machines`) | Manage hosts, invitations, or `provider login` |
+| `cluster status`, `cluster env` | `cluster up`, `cluster down` |
+| `machine status`, `shell`, `exec`, `copy`, `connect`, snapshot create/list | `machine up`, `machine down`, snapshot delete |
+| `host verify`, `list`, `use`; `invite join` | Most other `host` subcommands |
 
 
 
@@ -268,8 +304,10 @@ outpost host stop personal            # stop EC2 instance, pause compute billing
 outpost host start personal           # start again and wait for SSH
 outpost host restart personal
 outpost host resize personal --instance-type t3.large
+outpost host update-ssh-access personal  # refresh SSH ingress for your current IP
 outpost host remove personal           # remove from local config only
 outpost host destroy personal          # terminate the EC2 instance
+outpost host destroy personal --delete-volumes
 ```
 
 `stop` pauses the instance without deleting it — you avoid EC2 compute charges while it is stopped. Attached EBS volumes (and Elastic IPs) may still bill. `start` brings the host back and waits for SSH.
@@ -278,25 +316,31 @@ outpost host destroy personal          # terminate the EC2 instance
 
 ## Kubernetes
 
-Create and use Kubernetes clusters on the host with **kind** (default) or **k3d**. No local `kubectl` required.
-
-On hosts bootstrapped before k3d support was added, Outpost installs `k3d` automatically the first time you run a cluster command (`cluster create --driver k3d`, `cluster list`, `kubectl`, etc.) — existing kind/kubectl installs are left in place.
+Kubernetes is project-scoped. The managed project container receives the remote Docker socket, and Outpost runs either **kind** (the default) or **k3d** inside that container. The resulting Kubernetes node containers stay on the remote host.
 
 ```bash
-outpost cluster create dev
-outpost cluster create staging --workers 2
-outpost cluster create edge --driver k3d
-outpost cluster create prod --driver k3d --workers 2
-outpost cluster list
-outpost cluster status dev
-outpost kubectl --cluster dev get nodes
-outpost kubectl --cluster dev apply -f ./manifest.yaml
-outpost cluster delete dev
+outpost init
+outpost cluster up                 # defaults to kind; saves the choice
+outpost open                       # forwards app ports and the Kubernetes API
+outpost cluster env -- make run    # runs locally with the project kubeconfig
 ```
 
-Use `--driver kind` (default) or `--driver k3d` on `cluster create`. List, status, delete, and kubectl work the same for both drivers.
+Choose k3d when creating the project cluster:
 
-Local manifest files are uploaded automatically when you apply them.
+```bash
+outpost cluster up --driver k3d
+```
+
+The driver flag updates the project configuration. Changing drivers never deletes an existing cluster automatically:
+
+```bash
+outpost cluster down
+outpost cluster up --driver k3d
+```
+
+`outpost open` writes the tunneled, project-specific kubeconfig to `.outpost/kubeconfig`. It does not modify `~/.kube/config`. `outpost cluster env -- COMMAND` runs a local command with that file as `KUBECONFIG`.
+
+Kubernetes is project-scoped. Use `outpost cluster up/down/status` and `outpost cluster env -- kubectl ...`.
 
 ## Linux machines
 
@@ -312,26 +356,26 @@ System containers are lightweight and work on most hosts, including standard EC2
 
 **Containers vs VMs:** A **system container** shares the host Linux kernel (like a very isolated chroot). It starts fast, uses little RAM, and works on almost any Linux host — this is the default. A **VM** runs a full guest kernel via KVM with stronger isolation, but needs more resources and only works when the host has KVM (bare metal, metal EC2, or nested virtualization). Use containers for everyday dev/test; use VMs when you need a real kernel or kernel modules.
 
-Outpost checks host capacity **before** creating a machine. If the host is low on resources, the command fails with available amounts — run `outpost capacity` to inspect the host, or request a smaller machine.
+Each project owns one Incus machine. Outpost checks host capacity **before** creating it. If the host is low on resources, the command fails with available amounts — run `outpost capacity` to inspect the host, or request a smaller machine.
 
 ```bash
-outpost machine create ubuntu-dev --image ubuntu:24.04
-outpost machine create big-dev --image ubuntu:24.04 --cpu 2 --memory 2GiB --disk 20GiB
-outpost machine shell ubuntu-dev
-outpost machine exec ubuntu-dev -- uname -a
-outpost machine copy ./app ubuntu-dev:/tmp/app
-outpost machine copy ubuntu-dev:/tmp/output.log ./output.log
-outpost machine connect ubuntu-dev --port 8080:80
-outpost machine stop ubuntu-dev
-outpost machine snapshot create ubuntu-dev
-outpost machine delete ubuntu-dev
+outpost machine up --image ubuntu:24.04
+outpost machine up --cpu 2 --memory 2GiB --disk 20GiB
+outpost machine status
+outpost machine shell
+outpost machine exec -- uname -a
+outpost machine copy ./app project:/tmp/app
+outpost machine copy project:/tmp/output.log ./output.log
+outpost machine connect --port 8080:80
+outpost machine snapshot create
+outpost machine down
 ```
 
 **Virtual machines** need KVM. They work on bare-metal servers, metal EC2 instance types, or hosts with [nested virtualization](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/nested-virtualization.html). Standard `t3.`* instances do not support VMs — use system containers instead. VMs typically need more memory than the default; set `--memory` explicitly.
 
 ```bash
 outpost host capabilities
-outpost machine create vm-dev --image ubuntu:24.04 --virtual-machine --cpu 2 --memory 2GiB --disk 20GiB
+outpost machine up --image ubuntu:24.04 --virtual-machine --cpu 2 --memory 2GiB --disk 20GiB
 ```
 
 
@@ -349,6 +393,8 @@ outpost cleanup         # clean project-owned artifacts safely
 outpost prune --dry-run # preview cleanup
 outpost prune           # remove stopped containers, unused images, build cache
 outpost prune volumes   # explicit: unused named volumes
+outpost prune clusters  # owner only
+outpost prune machines  # owner only
 ```
 
 
@@ -381,7 +427,7 @@ Created by `outpost init`. Not uploaded to the remote host.
 
 | File | Purpose |
 | ---- | ------- |
-| `project.yaml` | Per-repo project, remote environment, cleanup, and compose settings |
+| `project.yaml` | Per-repo project, remote environment, Kubernetes driver, cleanup, and compose settings |
 | `.outpostignore` | Extra ignore rules for sync |
 
 
@@ -426,7 +472,7 @@ These flags work on every command:
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | SSH connection fails     | Test with `ssh user@host`. Check hostname, user, port, and key. Pass `--identity-file` to `host add` if needed.           |
 | Bootstrap fails          | Ensure your user has `sudo` on the host. On unsupported distros, install Docker manually, then run `outpost host verify`. |
-| Port forwarding conflict | Stop the local process on that port, or use `--local-port` or `--port` to pick a different local port.                    |
+| Port forwarding conflict | Stop the local process on that port, or change port mappings in Compose or your service config. |
 | Member access denied     | Owner runs `outpost invite list` and approves the device.                                                                 |
 | Not enough resources     | Run `outpost capacity` before creating stacks, clusters, or machines.                                                     |
 | Start over locally       | Run `outpost reset` to clear `~/.outpost` (hosts, keys, sessions). Remote servers and repo project files are kept.        |

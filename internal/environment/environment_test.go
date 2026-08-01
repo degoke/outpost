@@ -74,3 +74,21 @@ func TestDevcontainerImageAndWorkspaceAreHonored(t *testing.T) {
 	require.True(t, exec.HasCommand("--workdir '/workspaces/demo'"))
 	require.Equal(t, []int{3000}, project.Environment.Ports)
 }
+
+func TestKubernetesContainerIsRecreatedWhenHostGatewayIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	exec := mock.New()
+	exec.Responses["docker inspect"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{ExitCode: 0}
+	project := &config.Project{
+		Name: "demo", RemoteDir: "/var/lib/outpost/projects/demo",
+		Environment: &config.ProjectEnvironment{}, Kubernetes: &config.ProjectKubernetes{Driver: "kind"},
+	}
+	require.NoError(t, environment.New(exec, project, dir).Ensure(context.Background()))
+	require.True(t, exec.HasCommand("docker rm -f 'outpost-dev-demo'"))
+	require.True(t, exec.HasCommand("host.docker.internal:host-gateway"))
+}

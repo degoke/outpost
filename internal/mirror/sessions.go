@@ -195,9 +195,6 @@ func (r *Runner) AttachSession(ctx context.Context, shortName string) error {
 		Stderr: os.Stderr,
 	}
 	err = r.Exec.RunInteractive(ctx, cmd, opts)
-	if exitErr, ok := err.(*transport.ExitError); ok {
-		os.Exit(exitErr.Code)
-	}
 	return err
 }
 

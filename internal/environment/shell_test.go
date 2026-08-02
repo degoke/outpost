@@ -14,9 +14,10 @@ func TestDockerExecInteractiveUsesSingleTTY(t *testing.T) {
 	require.Contains(t, cmd, "COLORTERM=truecolor")
 }
 
-func TestShellBootstrapDockerfileInstallsStarship(t *testing.T) {
+func TestShellBootstrapDockerfileDoesNotRunUnpinnedInstaller(t *testing.T) {
 	df := shellBootstrapDockerfile()
-	require.Contains(t, df, "starship.rs/install.sh")
+	require.NotContains(t, df, "starship.rs/install.sh")
+	require.Contains(t, df, "command -v starship")
 	require.Contains(t, df, "starship init bash")
 }
 

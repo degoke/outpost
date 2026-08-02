@@ -33,7 +33,7 @@ Top-level alias: `outpost use NAME` equals `outpost host use NAME`.
 
 ## Notes
 
-- Host management is **owner only** except `list`, `verify`, and `use` (members).
+- Host management is **owner only** except `list`, `verify`, and `use` (members). A member's `verify` performs connectivity-only checks and never bootstraps or installs packages.
 - `host add` verifies SSH and bootstraps Docker unless `--skip-bootstrap` is set.
 - `host create` provisions EC2 via AWS credentials from `outpost provider login`.
 

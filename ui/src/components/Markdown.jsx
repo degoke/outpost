@@ -1,4 +1,3 @@
-import React from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -55,9 +54,7 @@ export function Markdown({ children }) {
                 </code>
               );
             }
-            return (
-              <CodeBlock className={className}>{children}</CodeBlock>
-            );
+            return <CodeBlock className={className}>{children}</CodeBlock>;
           },
         }}
       >

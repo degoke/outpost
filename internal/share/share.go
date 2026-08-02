@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,36 @@ type Service struct {
 	Global *config.Global
 	Exec   transport.Executor
 	Host   *config.Host
+}
+
+const manifestLockPath = "/var/lib/outpost/share/.manifest.lock"
+
+// lockManifest serializes read-modify-write operations on the remote share
+// manifest. Without a remote lock, two simultaneous joins could both consume
+// the same single-use invitation, or concurrent approvals could overwrite
+// each other's device changes.
+func lockManifest(ctx context.Context, exec transport.Executor) (func(), error) {
+	for attempt := 0; attempt < 50; attempt++ {
+		code, err := exec.Run(ctx, "mkdir "+shellQuote(manifestLockPath), transport.RunOpts{Stdout: io.Discard, Stderr: io.Discard})
+		if err != nil {
+			return nil, err
+		}
+		if code == 0 {
+			return func() {
+				_, _ = exec.Run(context.Background(), "rmdir "+shellQuote(manifestLockPath), transport.RunOpts{Stdout: io.Discard, Stderr: io.Discard})
+			}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil, fmt.Errorf("timed out waiting for the share manifest lock")
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (s *Service) LoadManifest(ctx context.Context) (*config.ShareManifest, error) {
@@ -61,6 +92,11 @@ func (s *Service) CreateInvitation(ctx context.Context, ttl time.Duration) (stri
 	if err := requireOwner(s.Host); err != nil {
 		return "", err
 	}
+	unlock, err := lockManifest(ctx, s.Exec)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	m, err := s.LoadManifest(ctx)
 	if err != nil {
 		return "", err
@@ -93,6 +129,11 @@ func (s *Service) CreateInvitation(ctx context.Context, ttl time.Duration) (stri
 }
 
 func (s *Service) JoinInvitation(ctx context.Context, code, label, hostname, user string, port int) error {
+	unlock, err := lockManifest(ctx, s.Exec)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	m, err := s.LoadManifest(ctx)
 	if err != nil {
 		return err
@@ -103,6 +144,12 @@ func (s *Service) JoinInvitation(ctx context.Context, code, label, hostname, use
 	}
 	if time.Now().After(inv.ExpiresAt) {
 		return fmt.Errorf("invitation code %q has expired", code)
+	}
+	if !inv.UsedAt.IsZero() {
+		return fmt.Errorf("invitation code %q has already been used", code)
+	}
+	if pending := pendingDeviceCount(m); pending >= 100 {
+		return fmt.Errorf("host has too many pending device approvals")
 	}
 	pubKey, privPath, err := ensureDeviceKey(m.HostID)
 	if err != nil {
@@ -115,6 +162,7 @@ func (s *Service) JoinInvitation(ctx context.Context, code, label, hostname, use
 		Status:    config.DevicePending,
 		JoinedAt:  time.Now().UTC(),
 	}
+	inv.UsedAt = time.Now().UTC()
 	m.Devices = append(m.Devices, device)
 	if err := s.SaveManifest(ctx, m); err != nil {
 		return err
@@ -139,6 +187,16 @@ func (s *Service) JoinInvitation(ctx context.Context, code, label, hostname, use
 	return config.SaveGlobal(s.Global)
 }
 
+func pendingDeviceCount(m *config.ShareManifest) int {
+	count := 0
+	for _, d := range m.Devices {
+		if d.Status == config.DevicePending {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Service) List(ctx context.Context) (*config.ShareManifest, error) {
 	return s.LoadManifest(ctx)
 }
@@ -147,6 +205,11 @@ func (s *Service) Approve(ctx context.Context, deviceID string) error {
 	if err := requireOwner(s.Host); err != nil {
 		return err
 	}
+	unlock, err := lockManifest(ctx, s.Exec)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	m, err := s.LoadManifest(ctx)
 	if err != nil {
 		return err
@@ -169,6 +232,11 @@ func (s *Service) Revoke(ctx context.Context, deviceID string) error {
 	if err := requireOwner(s.Host); err != nil {
 		return err
 	}
+	unlock, err := lockManifest(ctx, s.Exec)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	m, err := s.LoadManifest(ctx)
 	if err != nil {
 		return err
@@ -188,7 +256,14 @@ func syncAuthorizedKeys(ctx context.Context, exec transport.Executor, m *config.
 	var lines []string
 	for _, d := range m.Devices {
 		if d.Status == config.DeviceApproved {
-			lines = append(lines, strings.TrimSpace(d.PublicKey))
+			key := strings.TrimSpace(d.PublicKey)
+			if key == "" {
+				continue
+			}
+			// Shared keys must not be usable for SSH forwarding, agent/X11
+			// forwarding, or an interactive TTY. Runtime authorization remains
+			// enforced by the CLI and manifest checks.
+			lines = append(lines, "command=\"/usr/local/bin/outpost-member-shell\",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty,no-user-rc "+key)
 		}
 	}
 	content := strings.Join(lines, "\n")
@@ -206,11 +281,11 @@ func requireOwner(h *config.Host) error {
 }
 
 func generateCode() string {
-	b := make([]byte, 6)
+	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	enc := strings.ToUpper(base64.RawURLEncoding.EncodeToString(b))
 	if len(enc) > 8 {
-		enc = enc[:4] + "-" + enc[4:8]
+		enc = enc[:8] + "-" + enc[8:]
 	}
 	return enc
 }

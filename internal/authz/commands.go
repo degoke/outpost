@@ -19,6 +19,37 @@ func RequireMemberAllowed(h *config.Host, cmdPath string) error {
 	return fmt.Errorf("%q is restricted to the host owner — your role is %s", cmdPath, h.Role)
 }
 
+// RequireMemberAllowedArgs applies the member command policy including command
+// arguments. Docker and Compose are intentionally limited to read-only
+// inspection because unrestricted access to either is host-root equivalent.
+func RequireMemberAllowedArgs(h *config.Host, cmdPath string, args []string) error {
+	if err := RequireMemberAllowed(h, cmdPath); err != nil {
+		return err
+	}
+	if h == nil || h.Role != config.RoleMember {
+		return nil
+	}
+	parts := strings.Fields(cmdPath)
+	if len(parts) == 0 {
+		return nil
+	}
+	if parts[0] == "docker" {
+		if len(args) == 0 || !memberDockerReadOnly(args[0]) {
+			return fmt.Errorf("members may only use read-only docker commands (ps, logs, stats, top, version, info)")
+		}
+	}
+	return nil
+}
+
+func memberDockerReadOnly(command string) bool {
+	switch command {
+	case "ps", "logs", "stats", "top", "version", "info":
+		return true
+	default:
+		return false
+	}
+}
+
 func memberAllowedPath(cmdPath string) bool {
 	parts := strings.Fields(cmdPath)
 	if len(parts) == 0 {
@@ -26,19 +57,23 @@ func memberAllowedPath(cmdPath string) bool {
 	}
 	root := parts[0]
 	switch root {
-	case "docker", "compose", "status", "top", "capacity", "disk", "reset":
+	case "status", "top", "capacity", "disk", "reset":
 		return true
-	case "prune":
-		if len(parts) >= 2 && (parts[1] == "clusters" || parts[1] == "machines") {
-			return false
+	case "docker":
+		return true // argument policy is enforced by RequireMemberAllowedArgs.
+	case "compose":
+		if len(parts) >= 2 && (parts[1] == "ps" || parts[1] == "logs") {
+			return true
 		}
-		return true
+		return false
+	case "prune":
+		return false
 	case "cluster":
 		if len(parts) < 2 {
 			return false
 		}
 		switch parts[1] {
-		case "status", "env":
+		case "status":
 			return true
 		default:
 			return false
@@ -48,10 +83,10 @@ func memberAllowedPath(cmdPath string) bool {
 			return false
 		}
 		switch parts[1] {
-		case "status", "shell", "exec", "copy", "connect":
+		case "status":
 			return true
 		case "snapshot":
-			if len(parts) >= 3 && (parts[2] == "create" || parts[2] == "list") {
+			if len(parts) >= 3 && parts[2] == "list" {
 				return true
 			}
 			return false

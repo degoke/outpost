@@ -15,6 +15,8 @@ var alwaysIgnore = []string{
 	".git",
 	".outpost",
 	".DS_Store",
+	".env",
+	".env.*",
 }
 
 // AlwaysIgnorePatterns returns built-in ignore patterns used during sync.
@@ -56,12 +58,6 @@ func collectSyncPaths(cwd string, proj *config.Project) ([]string, error) {
 			return nil, err
 		}
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".env")); err == nil {
-		if err := add(".env"); err != nil {
-			return nil, err
-		}
-	}
-
 	contexts, err := parseBuildContexts(cwd, allComposeFiles(proj))
 	if err != nil {
 		return nil, err

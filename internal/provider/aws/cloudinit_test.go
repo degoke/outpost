@@ -10,12 +10,14 @@ import (
 )
 
 func TestCloudInitUserData(t *testing.T) {
-	data := aws.CloudInitUserDataForTest("ssh-ed25519 AAAA test")
+	key := "ssh-ed25519 AAAA test"
+	data := aws.CloudInitUserDataForTest(key)
 	require.NotEmpty(t, data)
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	require.NoError(t, err)
 	script := string(decoded)
-	require.Contains(t, script, "ssh-ed25519 AAAA test")
+	require.Contains(t, script, base64.StdEncoding.EncodeToString([]byte(key)))
+	require.Contains(t, script, "base64 --decode")
 	require.Contains(t, script, "outpost")
 	require.Contains(t, script, "machines")
 	require.Contains(t, script, "OUTPOST_CLOUD_INIT_OK")

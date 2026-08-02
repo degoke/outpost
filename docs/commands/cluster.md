@@ -28,7 +28,7 @@ outpost cluster down
 ## Notes
 
 - `cluster up` and `cluster down` are **owner only**.
-- Members can run `cluster status` and `cluster env`.
+- Members can run `cluster status`. `cluster env` is owner-only because it executes arbitrary local Kubernetes commands against the project tunnel.
 - Use [open](open) to forward the Kubernetes API and application ports; kubeconfig is written to `.outpost/kubeconfig`.
 
 ## Related

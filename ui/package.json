@@ -28,5 +28,10 @@
     "eslint-plugin-react": "latest",
     "globals": "latest",
     "prettier": "latest"
+  },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "1.1.17"
+    }
   }
 }

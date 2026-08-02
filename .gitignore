@@ -1,4 +1,5 @@
 /bin/
+/outpost
 *.test
 .DS_Store
 PLAN.md

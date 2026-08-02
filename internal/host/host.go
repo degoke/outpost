@@ -216,11 +216,19 @@ func (s *Service) Verify(ctx context.Context, hostName string, skipBootstrap boo
 	if err != nil {
 		return err
 	}
+	// Members may verify connectivity, but must never use this command as an
+	// alternate path to bootstrap packages or mutate the host.
+	if h.Role == config.RoleMember {
+		skipBootstrap = true
+	}
 	exec, err := transport.NewSSH(hostSSHConfig(h, autoTrustHostKey))
 	if err != nil {
 		return err
 	}
 	defer exec.Close()
+	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
+		return err
+	}
 
 	latency, err := transport.Ping(ctx, exec)
 	if err != nil {

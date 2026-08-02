@@ -470,11 +470,11 @@ func dockerExecInteractive(name, shell, inner string) string {
 	)
 }
 
-// shellBootstrapDockerfile returns Dockerfile lines that install starship and
-// enable a colored interactive shell in auto-built development images.
+// shellBootstrapDockerfile returns Dockerfile lines that enable a colored
+// interactive shell when starship is already present in the base image. Do
+// not execute an unpinned installer fetched from the network during a build.
 func shellBootstrapDockerfile() string {
-	return `RUN curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin \
- && printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc
+	return `RUN if command -v starship >/dev/null 2>&1; then printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc; fi
 `
 }
 
@@ -487,9 +487,9 @@ func (m *Manager) ensureShellBootstrap(ctx context.Context) error {
 }
 
 func shellBootstrapScript() string {
-	return `if command -v starship >/dev/null 2>&1; then exit 0; fi
-curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
-grep -q 'starship init bash' /etc/bash.bashrc 2>/dev/null || printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc`
+	return `if command -v starship >/dev/null 2>&1; then
+  grep -q 'starship init bash' /etc/bash.bashrc 2>/dev/null || printf '%s\n' 'eval "$(starship init bash)"' 'export TERM=xterm-256color' 'export COLORTERM=truecolor' >> /etc/bash.bashrc
+fi`
 }
 
 // ContainerExecutor exposes the managed project container as a transport

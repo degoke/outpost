@@ -64,7 +64,7 @@ export function getDocPage(slug) {
 }
 
 /** Flattened, ordered list of nav pages annotated with their section title. */
-export function getFlatNavItems() {
+function getFlatNavItems() {
   const flat = [];
   for (const section of getDocNav()) {
     for (const item of section.items) {
@@ -89,7 +89,12 @@ export function getDocPosition(slug) {
 }
 
 export function docHref(href) {
-  if (!href || href.startsWith("http") || href.startsWith("#") || href.startsWith("mailto:")) {
+  if (
+    !href ||
+    href.startsWith("http") ||
+    href.startsWith("#") ||
+    href.startsWith("mailto:")
+  ) {
     return href;
   }
   if (href === "index" || href === "../index") {

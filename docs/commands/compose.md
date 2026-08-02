@@ -33,7 +33,7 @@ outpost compose volumes import --force
 
 ## Notes
 
-- Members can run `compose` on shared hosts.
+- Members can run only `compose ps` and `compose logs` on shared hosts.
 - `up` syncs project files before starting services.
 - Port forwarding uses top-level [open](open), not a compose subcommand.
 

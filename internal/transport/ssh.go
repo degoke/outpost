@@ -40,14 +40,15 @@ func (e *SSHExecutor) connect() (*ssh.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	kh, err := hostKeyCallback(e.cfg)
+	if err != nil {
+		return nil, fmt.Errorf("load SSH host-key policy: %w", err)
+	}
 	sshCfg := &ssh.ClientConfig{
 		User:            e.cfg.User,
 		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: kh,
 		Timeout:         30 * time.Second,
-	}
-	if kh, err := hostKeyCallback(e.cfg); err == nil {
-		sshCfg.HostKeyCallback = kh
 	}
 	addr := fmt.Sprintf("%s:%d", e.cfg.Hostname, e.cfg.Port)
 	client, err := ssh.Dial("tcp", addr, sshCfg)
@@ -295,15 +296,27 @@ func (e *SSHExecutor) Download(remote string) ([]byte, error) {
 	}
 	sftpClient, err := sftp.NewClient(client)
 	if err != nil {
-		return nil, err
+		return e.downloadViaCommand(remote, err)
 	}
 	defer sftpClient.Close()
 	f, err := sftpClient.Open(remote)
 	if err != nil {
-		return nil, err
+		return e.downloadViaCommand(remote, err)
 	}
 	defer f.Close()
 	return io.ReadAll(f)
+}
+
+func (e *SSHExecutor) downloadViaCommand(remote string, sftpErr error) ([]byte, error) {
+	var out bytes.Buffer
+	code, err := e.Run(context.Background(), "cat "+shellQuote(remote), RunOpts{Stdout: &out})
+	if err != nil {
+		return nil, fmt.Errorf("sftp download failed: %v; command download failed: %w", sftpErr, err)
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("sftp download failed: %v; command download exited %d", sftpErr, code)
+	}
+	return out.Bytes(), nil
 }
 
 func (e *SSHExecutor) DownloadTo(local, remote string) error {

@@ -19,7 +19,7 @@ outpost docker exec -it my-container bash
 
 ## Notes
 
-- Members can run `docker` on shared hosts.
+- Members can run only read-only Docker inspection commands (`ps`, `logs`, `stats`, `top`, `version`, and `info`) on shared hosts.
 - Interactive flags (`-it`) are adjusted automatically when running over SSH so the terminal is not double-allocated.
 
 ## Related

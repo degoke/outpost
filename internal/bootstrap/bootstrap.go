@@ -29,7 +29,7 @@ install_docker_debian() {
   $need_sudo apt-get update -qq
   $need_sudo apt-get install -y -qq ca-certificates curl gnupg
   $need_sudo install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | $need_sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null || true
+	  curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | $need_sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $need_sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
   $need_sudo apt-get update -qq
   $need_sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -118,6 +118,107 @@ if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
   $need_sudo chown -R "$current_user:$current_user" "$OUTPOST_BASE"
 fi
 $need_sudo chmod 755 "$OUTPOST_BASE"
+
+# Install the forced command used by shared-member SSH keys. Members must not
+# be able to bypass the Outpost command policy by invoking ssh directly.
+member_shell_tmp=$(mktemp)
+cat > "$member_shell_tmp" <<'OUTPOST_MEMBER_SHELL'
+#!/bin/sh
+set -eu
+
+cmd=${SSH_ORIGINAL_COMMAND:-}
+deny() {
+  echo "OUTPOST_ERROR: shared member SSH keys may only run read-only Outpost operations" >&2
+  exit 126
+}
+[ -n "$cmd" ] || deny
+
+# Outpost's project executor prefixes commands with a safe project directory.
+# Strip only that exact shape; the path is restricted to the project root.
+case "$cmd" in
+  cd\ /var/lib/outpost/projects/*\ \&\&\ *)
+    project_path=${cmd#cd /var/lib/outpost/projects/}
+    project_path=${project_path%% && *}
+    cmd=${cmd#* && }
+    case "$project_path" in
+      ""|*[!A-Za-z0-9._/-]*|*..*) deny ;;
+    esac
+    ;;
+esac
+
+# These are fixed inspection commands emitted by the CLI. Keep the shell
+# operators only for these literal commands; all user-controlled commands are
+# checked below before being passed to a shell.
+case "$cmd" in
+  "echo outpost-ok"|"echo OUTPOST_SSH_OK"|\
+  "nproc"|"free -b | head -2"|"df -B1 / | tail -1"|"cat /proc/uptime"|"head -1 /proc/stat"|\
+  "docker info >/dev/null 2>&1"|"docker images -q | wc -l"|"docker volume ls -q | wc -l"|\
+  "docker network ls --filter dangling=true -q | wc -l"|"docker system df"|"docker compose ls --format json"|\
+  "cat '/var/lib/outpost/share/manifest.yaml'"|\
+  "incus list --format json 2>/dev/null || true"|"sudo incus list >/dev/null 2>&1"|\
+  "kind get clusters 2>/dev/null || true"|"k3d cluster list 2>/dev/null | awk 'NR>1 && NF {print \$1}' || true"|\
+  "ls -1 /var/lib/outpost/machines 2>/dev/null || true"|"ls -1 /var/lib/outpost/clusters 2>/dev/null || true"|\
+  "find /var/lib/outpost/projects -path '*/.upload-tmp/*' -type f 2>/dev/null || true"|\
+  "du -sb /var/lib/outpost/projects /var/lib/outpost/share /var/lib/outpost/machines /var/lib/outpost/toolchains /var/lib/outpost/clusters 2>/dev/null || true")
+    exec /bin/sh -c "$cmd"
+    ;;
+esac
+
+case "$cmd" in
+  "cat '/var/lib/outpost/machines/"*"/meta.yaml'"|"cat '/var/lib/outpost/clusters/"*"/meta.yaml'")
+    case "$cmd" in *".."*|*" "*) deny ;; esac
+    exec /bin/sh -c "$cmd"
+    ;;
+esac
+
+# No shell control operators, redirections, command substitution, or escaped
+# characters are accepted in user-controlled read-only commands.
+backtick=$(printf '\140')
+newline=$(printf '\n')
+carriage_return=$(printf '\r')
+case "$cmd" in
+  *";"*|*"&"*|*"|"*|*"<"*|*">"*|*'$('*|*"$backtick"*|*"$newline"*|*"$carriage_return"*|*"\\"*) deny ;;
+esac
+case "$cmd" in
+  "docker ps"|"docker ps "*|"docker logs"|"docker logs "*|\
+  "docker stats"|"docker stats "*|"docker top"|"docker top "*|\
+  "docker version"|"docker version "*|"docker info"|"docker info "*)
+    exec /bin/sh -c "$cmd"
+    ;;
+  "docker compose "*)
+    # Compose options may precede only the read-only ps/logs subcommands.
+    # A different Compose subcommand therefore cannot pass this parser.
+    normalized=$(printf '%s' "$cmd" | tr -d "'\"")
+    set -- $normalized
+    [ "${1:-}" = "docker" ] && [ "${2:-}" = "compose" ] || deny
+    shift 2
+    subcommand=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -p|-f|--project-name|--file)
+          [ "$#" -ge 2 ] || deny
+          shift 2
+          ;;
+        -*) shift ;;
+        ps|logs) subcommand=$1; shift; break ;;
+        *) deny ;;
+      esac
+    done
+    [ "$subcommand" = "ps" ] || [ "$subcommand" = "logs" ] || deny
+    exec /bin/sh -c "$cmd"
+    ;;
+  "incus list"|"incus list "*|"sudo incus list"|"sudo incus list "*)
+    exec /bin/sh -c "$cmd"
+    ;;
+  "kind get clusters"*|"k3d cluster list"*)
+    exec /bin/sh -c "$cmd"
+    ;;
+esac
+
+deny
+OUTPOST_MEMBER_SHELL
+$need_sudo install -m 0755 "$member_shell_tmp" /usr/local/bin/outpost-member-shell
+rm -f "$member_shell_tmp"
 
 if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
   if ! id -nG "$current_user" | grep -qw docker; then
@@ -245,19 +346,31 @@ case "$(uname -m)" in
   *) echo "OUTPOST_ERROR: unsupported project-container architecture $(uname -m)"; exit 1 ;;
 esac
 if ! command -v kubectl >/dev/null 2>&1; then
-  curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$arch/kubectl" -o /tmp/kubectl
-  chmod +x /tmp/kubectl
-  $need_sudo mv /tmp/kubectl /usr/local/bin/kubectl
+	version="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
+	url="https://dl.k8s.io/release/$version/bin/linux/$arch/kubectl"
+	curl -fsSL "$url" -o /tmp/kubectl
+	curl -fsSL "$url.sha256" -o /tmp/kubectl.sha256
+	printf '%s  %s\n' "$(cat /tmp/kubectl.sha256)" /tmp/kubectl | sha256sum -c -
+	  chmod +x /tmp/kubectl
+	  $need_sudo mv /tmp/kubectl /usr/local/bin/kubectl
 fi
 if ! command -v kind >/dev/null 2>&1; then
-  curl -fsSL "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-$arch" -o /tmp/kind
-  chmod +x /tmp/kind
-  $need_sudo mv /tmp/kind /usr/local/bin/kind
+	kind_url="https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-$arch"
+	curl -fsSL "$kind_url" -o /tmp/kind
+	curl -fsSL "$kind_url.sha256sum" -o /tmp/kind.sha256sum
+	printf '%s  %s\n' "$(awk '{print $1}' /tmp/kind.sha256sum)" /tmp/kind | sha256sum -c -
+	  chmod +x /tmp/kind
+	  $need_sudo mv /tmp/kind /usr/local/bin/kind
 fi
 if ! command -v k3d >/dev/null 2>&1; then
-  curl -fsSL "https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-$arch" -o /tmp/k3d
-  chmod +x /tmp/k3d
-  $need_sudo mv /tmp/k3d /usr/local/bin/k3d
+	  k3d_url="https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-$arch"
+	  curl -fsSL "$k3d_url" -o /tmp/k3d
+	  curl -fsSL "https://github.com/k3d-io/k3d/releases/download/v5.8.3/checksums.txt" -o /tmp/k3d-checksums.txt
+	  k3d_sum="$(awk -v f="k3d-linux-$arch" '$2 == f || $2 == "*" f {print $1; exit}' /tmp/k3d-checksums.txt)"
+	  [ -n "$k3d_sum" ] || { echo "OUTPOST_ERROR: no k3d checksum found"; exit 1; }
+	  printf '%s  %s\n' "$k3d_sum" /tmp/k3d | sha256sum -c -
+	  chmod +x /tmp/k3d
+	  $need_sudo mv /tmp/k3d /usr/local/bin/k3d
 fi
 `
 

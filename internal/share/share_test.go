@@ -37,6 +37,7 @@ func TestInvitationWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, manifest.Devices, 1)
 	require.Equal(t, config.DevicePending, manifest.Devices[0].Status)
+	require.False(t, manifest.Invitations[0].UsedAt.IsZero())
 	deviceID := manifest.Devices[0].ID
 	require.NotEmpty(t, global.Hosts)
 	for _, h := range global.Hosts {
@@ -58,4 +59,5 @@ func TestInvitationWorkflow(t *testing.T) {
 	keys, err = exec.Download(config.ShareAuthorizedKeysPath)
 	require.NoError(t, err)
 	require.Equal(t, "", strings.TrimSpace(string(keys)))
+	require.Error(t, svc.JoinInvitation(ctx, code, "second-laptop", "203.0.113.1", "ubuntu", 22))
 }

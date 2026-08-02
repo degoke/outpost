@@ -29,6 +29,7 @@ type Invitation struct {
 	Code      string    `yaml:"code"`
 	CreatedAt time.Time `yaml:"created_at"`
 	ExpiresAt time.Time `yaml:"expires_at"`
+	UsedAt    time.Time `yaml:"used_at,omitempty"`
 }
 
 type Device struct {
@@ -50,6 +51,9 @@ func (m *ShareManifest) ApprovedDeviceCount() int {
 }
 
 func (m *ShareManifest) FindDevice(id string) *Device {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
 	for i := range m.Devices {
 		if m.Devices[i].ID == id || strings.HasPrefix(m.Devices[i].ID, id) {
 			return &m.Devices[i]

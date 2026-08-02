@@ -1,31 +1,52 @@
-package host_test
+package host
 
 import (
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 
-	"github.com/degoke/outpost/internal/host"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDetectPublicIPCIDR(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("203.0.113.42\n"))
-	}))
-	defer srv.Close()
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
-	cidr, err := host.DetectPublicIPCIDRFromURL(srv.URL)
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDetectPublicIPCIDR(t *testing.T) {
+	old := publicIPClient
+	publicIPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader("203.0.113.42\n"))}, nil
+	})}
+	defer func() { publicIPClient = old }()
+
+	cidr, err := DetectPublicIPCIDRFromURL("https://example.test")
 	require.NoError(t, err)
 	require.Equal(t, "203.0.113.42/32", cidr)
 }
 
 func TestDetectPublicIPCIDREmptyResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("  \n"))
-	}))
-	defer srv.Close()
+	old := publicIPClient
+	publicIPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader("  \n"))}, nil
+	})}
+	defer func() { publicIPClient = old }()
 
-	_, err := host.DetectPublicIPCIDRFromURL(srv.URL)
+	_, err := DetectPublicIPCIDRFromURL("https://example.test")
 	require.Error(t, err)
+}
+
+func TestDetectPublicIPCIDRRejectsNonPublicAddresses(t *testing.T) {
+	for _, ip := range []string{"127.0.0.1", "10.0.0.1", "169.254.1.1", "::1", "fc00::1"} {
+		t.Run(ip, func(t *testing.T) {
+			old := publicIPClient
+			publicIPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(ip))}, nil
+			})}
+			defer func() { publicIPClient = old }()
+
+			_, err := DetectPublicIPCIDRFromURL("https://example.test")
+			require.Error(t, err)
+		})
+	}
 }

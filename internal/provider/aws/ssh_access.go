@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,6 +18,9 @@ func (p *Provisioner) UpdateSSHAccess(ctx context.Context, meta *config.Provider
 	}
 	if strings.TrimSpace(cidr) == "" {
 		return fmt.Errorf("SSH CIDR is required")
+	}
+	if _, _, err := net.ParseCIDR(strings.TrimSpace(cidr)); err != nil {
+		return fmt.Errorf("invalid SSH CIDR %q: %w", cidr, err)
 	}
 
 	desc, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{

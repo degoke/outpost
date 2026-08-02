@@ -9,6 +9,7 @@ const outpostUser = "outpost"
 
 func cloudInitUserData(sshPublicKey string) string {
 	// Keep cloud-init minimal so SSH is available quickly; bootstrap.Ensure installs Docker over SSH.
+	encodedKey := base64.StdEncoding.EncodeToString([]byte(sshPublicKey))
 	script := fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
 
@@ -16,7 +17,7 @@ if ! id -u %s >/dev/null 2>&1; then
   useradd -m -s /bin/bash -G sudo %s
 fi
 mkdir -p /home/%s/.ssh
-echo '%s' >> /home/%s/.ssh/authorized_keys
+echo '%s' | base64 --decode >> /home/%s/.ssh/authorized_keys
 chmod 700 /home/%s/.ssh
 chmod 600 /home/%s/.ssh/authorized_keys
 chown -R %s:%s /home/%s/.ssh
@@ -31,7 +32,7 @@ touch "$OUTPOST_BASE/share/authorized_keys"
 chmod 600 "$OUTPOST_BASE/share/authorized_keys"
 
 echo "OUTPOST_CLOUD_INIT_OK"
-`, outpostUser, outpostUser, outpostUser, sshPublicKey, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser)
+`, outpostUser, outpostUser, outpostUser, encodedKey, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser)
 	return base64.StdEncoding.EncodeToString([]byte(script))
 }
 

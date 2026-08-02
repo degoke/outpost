@@ -27,6 +27,8 @@ func TestShouldIgnoreRel(t *testing.T) {
 	patterns := upload.AlwaysIgnorePatterns()
 	require.True(t, upload.ShouldIgnoreRel(".git/config", patterns, false))
 	require.True(t, upload.ShouldIgnoreRel(".outpost/state", patterns, false))
+	require.True(t, upload.ShouldIgnoreRel(".env", patterns, false))
+	require.True(t, upload.ShouldIgnoreRel(".env.production", patterns, false))
 	require.False(t, upload.ShouldIgnoreRel("src/main.go", patterns, false))
 }
 
@@ -48,4 +50,15 @@ func TestQuoteSSHArgs(t *testing.T) {
 	path := filepath.Join(dir, "my key")
 	quoted := upload.QuoteSSHArgsForTest([]string{"-i", path})
 	require.Equal(t, "'"+path+"'", quoted[1])
+}
+
+func TestPullRejectsLocalSymlinkTargets(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "linked")))
+
+	// A remote path must never redirect a pull through a pre-existing local
+	// symlink into an unrelated directory.
+	require.Error(t, upload.EnsureSafeLocalRepoPathForTest(dir, "linked/secret.txt"))
 }

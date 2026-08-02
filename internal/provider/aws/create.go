@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -45,6 +46,13 @@ func (p *Provisioner) Create(ctx context.Context, opts provider.CreateOpts) (*pr
 	}
 	if opts.HostID == "" {
 		return nil, fmt.Errorf("host ID is required")
+	}
+	cidr := strings.TrimSpace(opts.SSHCIDR)
+	if cidr == "" {
+		return nil, fmt.Errorf("SSH CIDR is required; detect the caller IP before provisioning")
+	}
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return nil, fmt.Errorf("invalid SSH CIDR %q: %w", cidr, err)
 	}
 
 	rb := &rollbackState{}
@@ -149,6 +157,7 @@ func (p *Provisioner) findUbuntuAMI(ctx context.Context) (string, error) {
 }
 
 func (p *Provisioner) ensureSecurityGroup(ctx context.Context, opts provider.CreateOpts) (string, error) {
+	cidr := strings.TrimSpace(opts.SSHCIDR)
 	sgName := "outpost-" + strings.ReplaceAll(opts.HostID[:8], "-", "")
 	vpcOut, err := p.ec2.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{
 		Filters: []ec2types.Filter{{Name: aws.String("is-default"), Values: []string{"true"}}},
@@ -188,13 +197,18 @@ func (p *Provisioner) ensureSecurityGroup(ctx context.Context, opts provider.Cre
 		if derr != nil || len(desc.SecurityGroups) == 0 {
 			return "", fmt.Errorf("security group exists but could not be described: %w", err)
 		}
-		return *desc.SecurityGroups[0].GroupId, nil
+		groupID := desc.SecurityGroups[0].GroupId
+		if groupID == nil || strings.TrimSpace(*groupID) == "" {
+			return "", fmt.Errorf("existing security group has no ID")
+		}
+		// Reconcile an existing managed group as well. Without this, a group
+		// created by an older version could retain a broad SSH ingress rule.
+		if err := p.UpdateSSHAccess(ctx, &config.ProviderMeta{SecurityGroup: *groupID}, cidr); err != nil {
+			return "", err
+		}
+		return *groupID, nil
 	}
 
-	cidr := opts.SSHCIDR
-	if cidr == "" {
-		cidr = "0.0.0.0/0"
-	}
 	_, err = p.ec2.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: createOut.GroupId,
 		IpPermissions: []ec2types.IpPermission{

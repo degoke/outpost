@@ -1,9 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CopyCommand } from "../components/CodeBlock.jsx";
-import {
-  RotatingText,
-  TerminalDemo,
-} from "../components/TerminalDemo.jsx";
+import { RotatingText, TerminalDemo } from "../components/TerminalDemo.jsx";
+import { useReducedMotion } from "../hooks/useReducedMotion.js";
 import { INSTALL_COMMAND, INSTALL_COMMAND_DISPLAY } from "../constants.js";
 import {
   BENTO_FEATURES,
@@ -14,9 +12,7 @@ import {
 function Topology() {
   const ref = useRef(null);
   const [offset, setOffset] = useState(0);
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (reducedMotion) {
@@ -40,9 +36,11 @@ function Topology() {
 
   return (
     <div
-      className="topology topology-parallax"
+      className="topology"
       ref={ref}
-      style={reducedMotion ? undefined : { transform: `translateY(${offset}px)` }}
+      style={
+        reducedMotion ? undefined : { transform: `translateY(${offset}px)` }
+      }
     >
       <svg
         viewBox="0 0 520 370"
@@ -85,10 +83,10 @@ function Topology() {
           [360, 185],
           [430, 225],
         ].map(([cx, cy]) => (
-          <React.Fragment key={cx}>
+          <Fragment key={cx}>
             <circle cx={cx} cy={cy} r="8" fill="#2563ff" filter="url(#glow)" />
             <circle cx={cx} cy={cy} r="18" fill="none" stroke="#2563ff" />
-          </React.Fragment>
+          </Fragment>
         ))}
         <text x="82" y="238">
           LOCAL
@@ -116,7 +114,10 @@ function Topology() {
 export function Home() {
   return (
     <>
-      <section className="hero hero-artistic wrap grid-bg grid-bg-drift" id="top">
+      <section
+        className="hero hero-artistic wrap grid-bg grid-bg-drift"
+        id="top"
+      >
         <div className="hero-copy">
           <h1 className="hero-title">
             <span>Your laptop stays light.</span>

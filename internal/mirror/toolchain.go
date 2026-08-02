@@ -346,6 +346,7 @@ func remoteGoArch(ctx context.Context, exec transport.Executor) (string, error) 
 func goInstallScript(version, arch, installDir string) string {
 	tarball := fmt.Sprintf("go%s.linux-%s.tar.gz", version, arch)
 	url := fmt.Sprintf("https://go.dev/dl/%s", tarball)
+	checksumURL := url + ".sha256"
 	return fmt.Sprintf(`
 set -e
 need_sudo=""
@@ -357,10 +358,28 @@ $need_sudo mkdir -p %s
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL %s -o "$tmp/%s"
+curl -fsSL %s -o "$tmp/%s.sha256"
+expected=$(awk '{print $1}' "$tmp/%s.sha256")
+case "$expected" in
+  (""|*[!0-9A-Fa-f]*) echo "OUTPOST_ERROR: invalid Go archive checksum" >&2; exit 1 ;;
+esac
+if [ "${#expected}" -ne 64 ]; then
+  echo "OUTPOST_ERROR: invalid Go archive checksum" >&2
+  exit 1
+fi
+actual=$(sha256sum "$tmp/%s" | awk '{print $1}')
+if [ "$actual" != "$expected" ]; then
+  echo "OUTPOST_ERROR: Go archive checksum verification failed" >&2
+  exit 1
+fi
+if tar -tzf "$tmp/%s" | awk 'BEGIN { bad=0 } /^(\/|.*(^|\/)\.\.(\/|$))/ { bad=1 } END { exit bad }'; then :; else
+  echo "OUTPOST_ERROR: unsafe Go archive path" >&2
+  exit 1
+fi
 tar -C "$tmp" -xzf "$tmp/%s"
 $need_sudo rm -rf %s
 $need_sudo mv "$tmp/go" %s
-`, shellQuote(installDir+"/bin/go"), shellQuote(filepath.Dir(installDir)), shellQuote(url), tarball, tarball, shellQuote(installDir), shellQuote(installDir))
+`, shellQuote(installDir+"/bin/go"), shellQuote(filepath.Dir(installDir)), shellQuote(url), tarball, shellQuote(checksumURL), tarball, tarball, tarball, tarball, tarball, shellQuote(installDir), shellQuote(installDir))
 }
 
 func wrapCommandPath(cmd string, pathPrefixes []string) string {

@@ -24,6 +24,9 @@ func remoteMigrateStaging(proj *config.Project) string {
 }
 
 func localArchiveFile(projectName, archiveName string) (string, error) {
+	if filepath.Base(archiveName) != archiveName || archiveName == "." || archiveName == ".." || strings.ContainsAny(archiveName, `/\\`) {
+		return "", fmt.Errorf("invalid migration archive name %q", archiveName)
+	}
 	dir, err := config.VolumeArchivesDir(projectName)
 	if err != nil {
 		return "", err
@@ -41,6 +44,9 @@ func exportDockerVolumesTo(ctx context.Context, exec transport.Executor, vols []
 
 	exported := 0
 	for _, v := range vols {
+		if _, err := localArchiveFile("project", v.ArchiveName); err != nil {
+			return exported, err
+		}
 		exists, err := dockerVolumeExists(ctx, exec, v.DockerName)
 		if err != nil {
 			return exported, err
@@ -83,6 +89,9 @@ func importDockerVolumesFrom(ctx context.Context, exec transport.Executor, remot
 
 	imported := 0
 	for _, v := range vols {
+		if _, err := localArchiveFile("project", v.ArchiveName); err != nil {
+			return imported, err
+		}
 		remoteArchive := remoteStaging + "/" + v.ArchiveName
 		if !remoteFileExists(ctx, exec, remoteArchive) {
 			continue

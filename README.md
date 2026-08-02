@@ -184,7 +184,7 @@ outpost docker ps
 outpost docker logs my-container
 ```
 
-`up` syncs required files before running. Keep secrets in `.env` and out of version control — Outpost syncs `.env` to the host when it exists locally.
+`up` syncs required files before running. Secret files such as `.env` and `.env.*` are excluded from synchronization; provide secrets through your deployment or container secret-management mechanism.
 
 Create `.outpost/.outpostignore` (created automatically by `outpost init`) to exclude paths from sync. Same syntax as `.gitignore`. In git repositories, it applies **in addition to** `.gitignore`:
 
@@ -283,14 +283,16 @@ outpost invite revoke DEVICE_ID
 outpost invite join CODE --hostname 203.0.113.10 --user ubuntu --label my-laptop
 ```
 
-Members can run workloads (`docker`, `compose`, and runtime inspection commands) but cannot initialize projects, open port forwarding, migrate hosts, or manage infrastructure. Destructive operations warn when other teammates may be affected.
+Members can inspect runtime state with read-only Docker/Compose commands, but cannot create workloads, initialize projects, open port forwarding, migrate hosts, or manage infrastructure.
+
+Approved member keys are installed with a forced, read-only SSH command and forwarding disabled. Re-run `outpost host verify` as the owner after upgrading an existing host so the restriction wrapper is installed before approving new devices.
 
 | Members can | Members cannot |
 | ----------- | -------------- |
-| `docker`, `compose` | `init`, `shell`, `run`, `open`, `close`, `migrate`, `cleanup`, `app` |
-| `status`, `top`, `capacity`, `disk`, `prune` (not `prune clusters` / `prune machines`) | Manage hosts, invitations, or `provider login` |
-| `cluster status`, `cluster env` | `cluster up`, `cluster down` |
-| `machine status`, `shell`, `exec`, `copy`, `connect`, snapshot create/list | `machine up`, `machine down`, snapshot delete |
+| read-only `docker`, `compose ps`, `compose logs` | `compose up/down/exec/build/pull`, `docker run/exec/cp`, `init`, `shell`, `run`, `open`, `close`, `migrate`, `cleanup`, `app` |
+| `status`, `top`, `capacity`, `disk` | `prune`, manage hosts, invitations, or `provider login` |
+| `cluster status` | `cluster env`, `cluster up`, `cluster down` |
+| `machine status`, snapshot list | `machine shell/exec/copy/connect`, snapshot create, `machine up`, `machine down`, snapshot delete |
 | `host verify`, `list`, `use`; `invite join` | Most other `host` subcommands |
 
 

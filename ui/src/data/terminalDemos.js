@@ -64,21 +64,8 @@ export const WORKFLOW_TERMINAL_DEMO = [
   },
 ];
 
-export const TICKER_COMMANDS = [
-  "outpost init",
-  "outpost shell",
-  "outpost run -- npm test",
-  "outpost migrate --from old --to new",
-  "outpost compose up",
-  "outpost open",
-  "outpost cluster up",
-  "outpost machine shell",
-  "outpost host create dev",
-];
-
 export const BENTO_FEATURES = [
   {
-    id: "env",
     featured: true,
     icon: "⟳",
     title: "Managed environments",

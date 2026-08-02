@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { searchDocs } from "../lib/search.js";
 
-export function DocsSearch({ onSelect, compact = false }) {
+export function DocsSearch({ onSelect }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -50,17 +50,12 @@ export function DocsSearch({ onSelect, compact = false }) {
   };
 
   return (
-    <div className={`docs-search ${compact ? "compact" : ""}`.trim()} ref={rootRef}>
-      {compact ? null : (
-        <label className="docs-search-label mono" htmlFor="docs-search-input">
-          Search docs
-        </label>
-      )}
+    <div className="docs-search" ref={rootRef}>
       <input
         id="docs-search-input"
         type="search"
         className="docs-search-input mono"
-        placeholder={compact ? "Search…" : "Search commands, guides, flags…"}
+        placeholder="Search…"
         value={query}
         autoComplete="off"
         spellCheck={false}

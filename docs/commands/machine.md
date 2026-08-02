@@ -30,7 +30,7 @@ outpost machine down
 ## Notes
 
 - `machine up` and `machine down` are **owner only**.
-- Members can use `shell`, `exec`, `copy`, `connect`, and snapshot create/list.
+- Members can use `machine status` and snapshot list only. Shell, exec, copy, connect, and snapshot creation are owner-only because they can mutate or expose the host runtime.
 - Check `outpost host capabilities` for KVM support before creating VMs.
 
 ## Related

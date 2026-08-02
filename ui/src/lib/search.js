@@ -39,7 +39,3 @@ export function searchDocs(query, limit = 12) {
   }
   return miniSearch.search(q).slice(0, limit);
 }
-
-export function docResultHref(slug) {
-  return slug === "index" ? "#docs" : `#docs/${slug}`;
-}

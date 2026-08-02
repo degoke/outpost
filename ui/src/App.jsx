@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Footer, Header } from "./components/Layout.jsx";
 import { isDocsHash, normalizeHash, slugFromHash } from "./lib/docs.js";
 import { Docs } from "./pages/Docs.jsx";
@@ -44,11 +44,7 @@ export function App() {
   return (
     <>
       <Header docsActive={route.page === "docs"} />
-      {route.page === "docs" ? (
-        <Docs initialSlug={route.slug} />
-      ) : (
-        <Home />
-      )}
+      {route.page === "docs" ? <Docs initialSlug={route.slug} /> : <Home />}
       <Footer />
     </>
   );

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "../hooks/useReducedMotion.js";
 
 function TerminalLine({ line }) {
   if (line.type === "forward") {
@@ -23,15 +24,39 @@ function TerminalLine({ line }) {
   );
 }
 
-export function TerminalDemo({ script, loopDelay = 2400, whenVisible = false }) {
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function TerminalBar() {
+  return (
+    <div className="terminal-bar">
+      <i />
+      <i />
+      <i />
+      <span className="terminal-title mono">outpost · remote session</span>
+      <span className="terminal-state mono">
+        <b /> connected
+      </span>
+    </div>
+  );
+}
+
+function TerminalChrome({ bodyRef, ariaLive, children }) {
+  return (
+    <div
+      className="terminal terminal-demo"
+      {...(ariaLive ? { "aria-live": "polite" } : {})}
+    >
+      <TerminalBar />
+      <div className="terminal-body mono" ref={bodyRef}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function TerminalDemo({ script, loopDelay = 2400 }) {
+  const reducedMotion = useReducedMotion();
   const [history, setHistory] = useState([]);
   const [typing, setTyping] = useState("");
-  const [inView, setInView] = useState(!whenVisible);
   const timers = useRef([]);
-  const rootRef = useRef(null);
   const bodyRef = useRef(null);
 
   const clearTimers = useCallback(() => {
@@ -40,9 +65,7 @@ export function TerminalDemo({ script, loopDelay = 2400, whenVisible = false }) 
   }, []);
 
   const schedule = useCallback((fn, ms) => {
-    const id = setTimeout(fn, ms);
-    timers.current.push(id);
-    return id;
+    timers.current.push(setTimeout(fn, ms));
   }, []);
 
   const run = useCallback(() => {
@@ -90,38 +113,13 @@ export function TerminalDemo({ script, loopDelay = 2400, whenVisible = false }) 
   }, [clearTimers, loopDelay, schedule, script]);
 
   useEffect(() => {
-    if (!whenVisible || reducedMotion) {
-      return;
-    }
-
-    const node = rootRef.current;
-    if (!node) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(entry.isIntersecting),
-      { threshold: 0.35 },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [reducedMotion, whenVisible]);
-
-  useEffect(() => {
-    if (!inView) {
-      clearTimers();
-      setHistory([]);
-      setTyping("");
-      return;
-    }
-
     if (reducedMotion) {
       return;
     }
 
     run();
     return clearTimers;
-  }, [clearTimers, inView, reducedMotion, run]);
+  }, [clearTimers, reducedMotion, run]);
 
   useEffect(() => {
     const body = bodyRef.current;
@@ -133,94 +131,51 @@ export function TerminalDemo({ script, loopDelay = 2400, whenVisible = false }) 
 
   if (reducedMotion) {
     return (
-      <div className="terminal terminal-demo" ref={rootRef}>
-        <div className="terminal-bar">
-          <i />
-          <i />
-          <i />
-          <span className="terminal-title mono">outpost · remote session</span>
-          <span className="terminal-state mono">
-            <b /> connected
-          </span>
-        </div>
-        <div className="terminal-body mono" ref={bodyRef}>
-          {script.map((block, blockIndex) => (
-            <React.Fragment key={block.command}>
-              <div>
-                <span className="prompt">$</span> {block.command}
-              </div>
-              {block.lines.map((line, lineIndex) => (
-                <TerminalLine key={lineIndex} line={line} />
-              ))}
-              {blockIndex < script.length - 1 ? (
-                <div className="terminal-blank" />
-              ) : null}
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
+      <TerminalChrome bodyRef={bodyRef}>
+        {script.map((block, blockIndex) => (
+          <Fragment key={block.command}>
+            <div>
+              <span className="prompt">$</span> {block.command}
+            </div>
+            {block.lines.map((line, lineIndex) => (
+              <TerminalLine key={lineIndex} line={line} />
+            ))}
+            {blockIndex < script.length - 1 ? (
+              <div className="terminal-blank" />
+            ) : null}
+          </Fragment>
+        ))}
+      </TerminalChrome>
     );
   }
 
   return (
-    <div className="terminal terminal-demo" aria-live="polite" ref={rootRef}>
-      <div className="terminal-bar">
-        <i />
-        <i />
-        <i />
-        <span className="terminal-title mono">outpost · remote session</span>
-        <span className="terminal-state mono">
-          <b /> connected
-        </span>
-      </div>
-      <div className="terminal-body mono" ref={bodyRef}>
-        {history.map((entry, index) => {
-          if (entry.kind === "command") {
-            return (
-              <div key={index}>
-                <span className="prompt">$</span> {entry.text}
-              </div>
-            );
-          }
-          if (entry.kind === "blank") {
-            return <div key={index} className="terminal-blank" />;
-          }
-          return <TerminalLine key={index} line={entry.line} />;
-        })}
-        {typing ? (
-          <div>
-            <span className="prompt">$</span> {typing}
-            <span className="terminal-cursor" aria-hidden="true" />
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-export function CommandTicker({ commands }) {
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const items = [...commands, ...commands];
-
-  return (
-    <div className="command-ticker" aria-hidden="true">
-      <div className={`command-ticker-track ${reducedMotion ? "static" : ""}`}>
-        {items.map((cmd, i) => (
-          <span key={`${cmd}-${i}`} className="mono">
-            {cmd}
-          </span>
-        ))}
-      </div>
-    </div>
+    <TerminalChrome bodyRef={bodyRef} ariaLive>
+      {history.map((entry, index) => {
+        if (entry.kind === "command") {
+          return (
+            <div key={index}>
+              <span className="prompt">$</span> {entry.text}
+            </div>
+          );
+        }
+        if (entry.kind === "blank") {
+          return <div key={index} className="terminal-blank" />;
+        }
+        return <TerminalLine key={index} line={entry.line} />;
+      })}
+      {typing ? (
+        <div>
+          <span className="prompt">$</span> {typing}
+          <span className="terminal-cursor" aria-hidden="true" />
+        </div>
+      ) : null}
+    </TerminalChrome>
   );
 }
 
 export function RotatingText({ items, interval = 2600 }) {
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = useReducedMotion();
   const [index, setIndex] = useState(0);
   const [visible, setVisible] = useState(true);
 

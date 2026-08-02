@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GITHUB } from "../constants.js";
 import { DocsSearch } from "../components/DocsSearch.jsx";
 import { Markdown } from "../components/Markdown.jsx";
@@ -112,7 +112,7 @@ export function Docs({ initialSlug }) {
 
         <aside className={`docs-nav ${navOpen ? "open" : ""}`}>
           <div className="docs-nav-search">
-            <DocsSearch onSelect={selectPage} compact />
+            <DocsSearch onSelect={selectPage} />
           </div>
           {nav.map((section) => (
             <div key={section.id} className="docs-nav-section">

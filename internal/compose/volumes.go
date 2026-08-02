@@ -63,6 +63,9 @@ func ParseNamedVolumes(cwd string, proj *config.Project) ([]VolumeInfo, error) {
 		}
 		vols, _ := doc["volumes"].(map[string]any)
 		for logical, raw := range vols {
+			if filepath.Base(logical) != logical || logical == "." || logical == ".." || strings.ContainsAny(logical, `/\\`) {
+				return nil, fmt.Errorf("invalid compose volume name %q", logical)
+			}
 			if isExternalVolume(raw) {
 				continue
 			}
@@ -187,6 +190,9 @@ func remoteStagingDir(proj *config.Project) string {
 }
 
 func localArchivePath(projectName, logicalName string) (string, error) {
+	if filepath.Base(logicalName) != logicalName || logicalName == "." || logicalName == ".." || strings.ContainsAny(logicalName, `/\\`) {
+		return "", fmt.Errorf("invalid compose volume name %q", logicalName)
+	}
 	dir, err := config.VolumeArchivesDir(projectName)
 	if err != nil {
 		return "", err

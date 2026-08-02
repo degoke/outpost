@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
 import { GITHUB } from "../constants.js";
 
 export function Logo() {
@@ -18,7 +18,7 @@ export function Logo() {
 export function GitHubStar() {
   const [stars, setStars] = useState(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetch("https://api.github.com/repos/degoke/outpost")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => data && setStars(data.stargazers_count))

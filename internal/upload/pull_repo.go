@@ -80,6 +80,12 @@ func pullFiles(cwd string, proj *config.Project, session *transport.SFTPSession,
 
 	tasks := make([]pullTask, 0, len(files))
 	for _, rel := range files {
+		if !safeRepoRelativePath(rel) {
+			return fmt.Errorf("unsafe remote repository path %q", rel)
+		}
+		if err := ensureSafeLocalRepoPath(cwd, rel); err != nil {
+			return err
+		}
 		local := filepath.Join(cwd, rel)
 		remote := remotePath(proj, rel)
 		needPull, err := needsPullSession(session, local, remote)
@@ -104,11 +110,11 @@ func pullFiles(cwd string, proj *config.Project, session *transport.SFTPSession,
 	}
 
 	var (
-		mu        sync.Mutex
-		pulled    int
-		firstErr  error
-		wg        sync.WaitGroup
-		sem       = make(chan struct{}, workers)
+		mu       sync.Mutex
+		pulled   int
+		firstErr error
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, workers)
 	)
 
 	for _, task := range tasks {
@@ -194,6 +200,9 @@ func listRemoteRepoPaths(cwd string, proj *config.Project, exec transport.Execut
 		if rel == "" {
 			continue
 		}
+		if !safeRepoRelativePath(rel) {
+			return nil, fmt.Errorf("unsafe remote repository path %q", rel)
+		}
 		if shouldIgnoreRepo(rel, patterns, false) {
 			continue
 		}
@@ -221,6 +230,9 @@ func pullRepoLegacy(cwd string, proj *config.Project, exec transport.Executor, o
 	// Include remote-only files when the executor can enumerate them.
 	if remotePaths, err := listRemoteRepoPaths(cwd, proj, exec); err == nil {
 		for _, rel := range remotePaths {
+			if !safeRepoRelativePath(rel) {
+				return fmt.Errorf("unsafe remote repository path %q", rel)
+			}
 			if !seen[rel] {
 				localPaths = append(localPaths, rel)
 				seen[rel] = true
@@ -232,6 +244,9 @@ func pullRepoLegacy(cwd string, proj *config.Project, exec transport.Executor, o
 	}
 	pulled := 0
 	for _, rel := range localPaths {
+		if err := ensureSafeLocalRepoPath(cwd, rel); err != nil {
+			return err
+		}
 		local := filepath.Join(cwd, rel)
 		remote := remotePath(proj, rel)
 		data, err := exec.Download(remote)
@@ -260,6 +275,47 @@ func pullRepoLegacy(cwd string, proj *config.Project, exec transport.Executor, o
 		opts.Out.Step("Local files already up to date")
 	}
 	return nil
+}
+
+func safeRepoRelativePath(rel string) bool {
+	if rel == "" || filepath.IsAbs(rel) {
+		return false
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	return clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+// ensureSafeLocalRepoPath prevents a remote repository pull from following
+// symlinks already present in the local checkout. A remote-controlled path
+// must not be able to redirect a write outside the selected working tree.
+func ensureSafeLocalRepoPath(cwd, rel string) error {
+	if !safeRepoRelativePath(rel) {
+		return fmt.Errorf("unsafe repository path %q", rel)
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	current := cwd
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("inspect local path %q: %w", filepath.Join(rel), err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to write through local symlink %q", filepath.Join(rel))
+		}
+	}
+	return nil
+}
+
+// EnsureSafeLocalRepoPathForTest exposes local pull path validation to tests.
+func EnsureSafeLocalRepoPathForTest(cwd, rel string) error {
+	return ensureSafeLocalRepoPath(cwd, rel)
 }
 
 func needsPullBytes(local string, remote []byte) (bool, error) {

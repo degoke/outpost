@@ -115,10 +115,7 @@ verify_checksum() {
 
 	base="$(basename "${archive}")"
 	expected="$(awk -v f="${base}" '$2 == f { print $1; exit }' "${checksums}")"
-	if [ -z "${expected}" ]; then
-		warn "no checksum entry for ${base}; skipping verification"
-		return 0
-	fi
+	[ -n "${expected}" ] || die "no checksum entry for ${base}"
 	actual="$(sha256_file "${archive}")"
 	if [ "${actual}" != "${expected}" ]; then
 		die "checksum mismatch for ${base}"
@@ -132,11 +129,27 @@ extract_binary() {
 
 	case "${archive}" in
 	*.tar.gz)
-		tar -xzf "${archive}" -C "${dest_dir}"
+		if tar -tzf "${archive}" | awk '
+			BEGIN { bad=0 }
+			/^\// || /(^|\/)\.\.($|\/)/ { bad=1 }
+			END { exit bad }
+		'; then
+			tar --no-same-owner -xzf "${archive}" -C "${dest_dir}"
+		else
+			die "archive contains an unsafe path"
+		fi
 		;;
 	*.zip)
 		need_cmd unzip
-		unzip -qo "${archive}" -d "${dest_dir}"
+		if unzip -Z1 "${archive}" | awk '
+			BEGIN { bad=0 }
+			/^\// || /(^|\/)\.\.($|\/)/ { bad=1 }
+			END { exit bad }
+		'; then
+			unzip -qo "${archive}" -d "${dest_dir}"
+		else
+			die "archive contains an unsafe path"
+		fi
 		;;
 	*)
 		die "unsupported archive format: ${archive}"
@@ -190,11 +203,8 @@ main() {
 	info "installing outpost ${tag} for ${os}/${arch}"
 	download "${base_url}/${archive}" "${archive_path}"
 
-	if download "${base_url}/checksums.txt" "${checksums_path}" 2>/dev/null; then
-		verify_checksum "${archive_path}" "${checksums_path}"
-	else
-		warn "checksums.txt not found for ${tag}; skipping verification"
-	fi
+	download "${base_url}/checksums.txt" "${checksums_path}" || die "release checksums.txt is required"
+	verify_checksum "${archive_path}" "${checksums_path}"
 
 	extract_binary "${archive_path}" "${tmpdir}" "${os}"
 	install_binary "${tmpdir}/${BINARY_NAME}"

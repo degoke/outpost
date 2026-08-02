@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type CreateOpts struct {
 	SSHCIDR      string
 	NoCleanup    bool
 }
+
+var publicIPClient = &http.Client{Timeout: 5 * time.Second}
 
 func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 	if opts.ProviderName != provider.ProviderAWS {
@@ -71,7 +74,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 		var detectErr error
 		sshCIDR, detectErr = DetectPublicIPCIDR()
 		if detectErr != nil {
-			s.Out.Info("Could not detect public IP for SSH ingress (%v) — pass --ssh-cidr to restrict access", detectErr)
+			return fmt.Errorf("could not detect caller public IP for SSH ingress: %w — pass --ssh-cidr explicitly", detectErr)
 		}
 	}
 
@@ -383,28 +386,37 @@ func waitForSSH(ctx context.Context, hostname, user, identityFile string) error 
 	return fmt.Errorf("SSH not ready after %s connecting to %s@%s", provisionSSHTimeout, user, hostname)
 }
 
-// DetectPublicIPCIDR returns the current public IP as a /32 CIDR block.
+// DetectPublicIPCIDR returns the current public IP as a host-only CIDR block.
 func DetectPublicIPCIDR() (string, error) {
 	return DetectPublicIPCIDRFromURL("https://checkip.amazonaws.com")
 }
 
-// DetectPublicIPCIDRFromURL fetches the caller's public IP from url and returns it as a /32 CIDR.
+// DetectPublicIPCIDRFromURL fetches the caller's public IP from url and returns it as a host-only CIDR.
 func DetectPublicIPCIDRFromURL(url string) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := publicIPClient.Get(url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("public IP service returned HTTP %s", resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 128))
 	if err != nil {
 		return "", err
 	}
 	ip := strings.TrimSpace(string(data))
-	if ip == "" {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
 		return "", fmt.Errorf("could not detect public IP")
 	}
-	return ip + "/32", nil
+	if !parsed.IsGlobalUnicast() || parsed.IsPrivate() || parsed.IsLoopback() || parsed.IsLinkLocalUnicast() || parsed.IsUnspecified() {
+		return "", fmt.Errorf("detected IP is not a public unicast address")
+	}
+	if parsed.To4() != nil {
+		return parsed.String() + "/32", nil
+	}
+	return parsed.String() + "/128", nil
 }
 
 func firstNonEmpty(vals ...string) string {

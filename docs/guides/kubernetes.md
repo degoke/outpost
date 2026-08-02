@@ -39,6 +39,6 @@ outpost cluster down
 ## Permissions
 
 - **Owner**: `cluster up`, `cluster down`
-- **Members**: `cluster status`, `cluster env`
+- **Members**: `cluster status` only; `cluster env` is owner-only because it executes arbitrary local Kubernetes commands against the project tunnel.
 
 See [cluster command reference](../commands/cluster).

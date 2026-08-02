@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 export function CopyCommand({ command, display = command, className = "" }) {
   const [copied, setCopied] = useState(false);

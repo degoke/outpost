@@ -46,6 +46,8 @@ type App struct {
 	Cwd             string
 	ForceYes        bool
 	executorFactory ExecutorFactory
+	commandPath     string
+	commandArgs     []string
 }
 
 // ExecutorFactory creates a transport executor for CLI commands. Tests inject a mock factory.
@@ -80,6 +82,8 @@ func (app *App) buildRoot() *cobra.Command {
 			app.Out = output.New(jsonOut, debug)
 			app.HostFlag, _ = cmd.Flags().GetString("host")
 			app.ForceYes, _ = cmd.Flags().GetBool("yes")
+			app.commandPath = commandPath(cmd)
+			app.commandArgs = append([]string(nil), args...)
 			hostName := app.HostFlag
 			if hostName == "" {
 				hostName = g.ActiveHost
@@ -88,7 +92,7 @@ func (app *App) buildRoot() *cobra.Command {
 			if hostName != "" {
 				h, _ = g.ResolveHost(hostName)
 			}
-			if err := authz.RequireMemberAllowed(h, commandPath(cmd)); err != nil {
+			if err := authz.RequireMemberAllowedArgs(h, commandPath(cmd), args); err != nil {
 				return err
 			}
 			return nil
@@ -182,11 +186,16 @@ func (app *App) withExecutor(run func(context.Context, transport.Executor, *conf
 		defer c.Close()
 	}
 	ctx := context.Background()
-	if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
-		return err
-	}
 	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
 		return err
+	}
+	if err := authz.RequireMemberAllowedArgs(h, app.commandPath, app.commandArgs); err != nil {
+		return err
+	}
+	if h.Role != config.RoleMember {
+		if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
+			return err
+		}
 	}
 	return run(ctx, exec, h)
 }
@@ -205,16 +214,23 @@ func (app *App) withProjectExecutor(run func(context.Context, transport.Executor
 		defer c.Close()
 	}
 	ctx := context.Background()
-	if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
-		return err
-	}
 	if err := authz.RequireRuntimeAccess(ctx, h, exec); err != nil {
 		return err
 	}
-	cleanupOpts := cleanup.OptionsForProject(proj)
-	cleanupOpts.IncludeDockerCache = false
-	if err := cleanup.Project(ctx, exec, proj, cleanupOpts); err != nil {
+	if err := authz.RequireMemberAllowedArgs(h, app.commandPath, app.commandArgs); err != nil {
 		return err
+	}
+	if h.Role != config.RoleMember {
+		if err := bootstrap.EnsureWithOut(ctx, exec, app.Out); err != nil {
+			return err
+		}
+	}
+	if h.Role != config.RoleMember {
+		cleanupOpts := cleanup.OptionsForProject(proj)
+		cleanupOpts.IncludeDockerCache = false
+		if err := cleanup.Project(ctx, exec, proj, cleanupOpts); err != nil {
+			return err
+		}
 	}
 	return run(ctx, exec, h, proj)
 }
@@ -1508,8 +1524,10 @@ func (app *App) machineCmd() *cobra.Command {
 }
 func (app *App) withProjectMachineExecutor(run func(context.Context, transport.Executor, *config.Host, *config.Project, *machine.ProjectService) error) error {
 	return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-		if err := bootstrap.EnsureIncusWithOut(ctx, exec, app.Out); err != nil {
-			return err
+		if h.Role != config.RoleMember {
+			if err := bootstrap.EnsureIncusWithOut(ctx, exec, app.Out); err != nil {
+				return err
+			}
 		}
 		return run(ctx, exec, h, proj, machine.NewProjectService(exec, proj, app.Out))
 	})

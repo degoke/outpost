@@ -31,7 +31,7 @@ func (r *Runner) buildCmd(subcommand string, args []string) string {
 	base := r.Project.RemoteDir
 	files := ""
 	for _, f := range upload.AllComposeFiles(r.Project) {
-		files += " -f " + base + "/" + filepath.Base(f)
+		files += " -f " + shellQuoteArg(base+"/"+filepath.Base(f))
 	}
 	return fmt.Sprintf("docker compose -p %s %s %s %s",
 		shellQuote(r.Project.Name),

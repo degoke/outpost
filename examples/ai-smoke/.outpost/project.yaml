@@ -1,0 +1,7 @@
+version: 1
+name: ai-smoke
+remote_dir: /var/lib/outpost/projects/ai-smoke
+environment:
+  enabled: true
+ai:
+  command: "echo e2e-ok"

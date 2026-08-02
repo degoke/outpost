@@ -1,0 +1,7 @@
+version: 1
+name: cluster-smoke
+remote_dir: /var/lib/outpost/projects/cluster-smoke
+kubernetes:
+  driver: kind
+environment:
+  enabled: true

@@ -31,12 +31,12 @@ func TestAWSComposeSmoke(t *testing.T) {
 
 	dir := copyExample(t, "node-postgres-redis")
 	mustRunOutpost(t, dir, "init", "--no-shell")
-	mustRunOutpost(t, dir, "--yes", "compose", "up", "-d", "--build")
+	mustRunOutpost(t, dir, "compose", "up", "-d", "--build")
 	t.Cleanup(func() {
-		_, _, _ = runOutpostAllowFail(t, dir, "--yes", "compose", "down")
+		_, _, _ = runOutpostAllowFail(t, dir, "compose", "down")
 	})
 
-	health := mustRunOutpost(t, dir, "run", "--", "curl", "-sf", "http://localhost:3000/health")
+	health := mustRunOutpost(t, dir, "compose", "exec", "-T", "app", "node", "-e", `fetch("http://127.0.0.1:3000/health").then(r=>r.text()).then(t=>{console.log(t);if(!t.includes("ok"))process.exit(1)})`)
 	if !strings.Contains(health, "ok") {
 		t.Fatalf("aws compose health check failed:\n%s", health)
 	}

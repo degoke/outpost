@@ -48,6 +48,15 @@ func TestParseManualPort(t *testing.T) {
 	require.Equal(t, 80, pm.TargetPort)
 }
 
+func TestMergePortMappingsManualPortWinsLocalBinding(t *testing.T) {
+	base := []connect.PortMapping{{Service: "app", HostPort: 3000, TargetPort: 3000, BindHost: "127.0.0.1"}}
+	manual := []connect.PortMapping{{Service: "manual", HostPort: 3000, TargetPort: 3000, BindHost: "127.0.0.1"}}
+
+	merged := connect.MergePortMappings(base, manual)
+	require.Len(t, merged, 1)
+	require.Equal(t, "manual", merged[0].Service)
+}
+
 func TestStartForwardsUsesHostPortOnRemote(t *testing.T) {
 	exec := mock.New()
 	mappings := []connect.PortMapping{{

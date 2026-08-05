@@ -50,3 +50,9 @@ func TestDetectPublicIPCIDRRejectsNonPublicAddresses(t *testing.T) {
 		})
 	}
 }
+
+func TestCloudSSHHostnamePrefersPublicIP(t *testing.T) {
+	require.Equal(t, "3.135.233.178", cloudSSHHostname("3.135.233.178", "ec2-3-135-233-178.us-east-2.compute.amazonaws.com"))
+	require.Equal(t, "ec2-3-135-233-178.us-east-2.compute.amazonaws.com", cloudSSHHostname("", "ec2-3-135-233-178.us-east-2.compute.amazonaws.com"))
+	require.Equal(t, "", cloudSSHHostname("", ""))
+}

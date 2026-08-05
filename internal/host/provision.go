@@ -93,9 +93,9 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) error {
 		return err
 	}
 
-	hostname := result.PublicDNS
+	hostname := cloudSSHHostname(result.PublicIP, result.PublicDNS)
 	if hostname == "" {
-		hostname = result.PublicIP
+		return fmt.Errorf("EC2 instance has no public address for SSH")
 	}
 	s.Out.Info("Waiting for SSH on %s...", hostname)
 	if err := waitForSSH(ctx, hostname, outpostUser, privPath); err != nil {
@@ -244,7 +244,10 @@ func (s *Service) Stop(ctx context.Context, name string) error {
 
 func (s *Service) refreshCloudHost(ctx context.Context, h *config.Host, prov *awsprovider.Provisioner) error {
 	if state, err := prov.Describe(ctx, h.Provider); err == nil {
-		h.Hostname = firstNonEmpty(state.PublicDNS, state.PublicIP, h.Hostname)
+		h.Hostname = cloudSSHHostname(state.PublicIP, state.PublicDNS)
+		if h.Hostname == "" {
+			h.Hostname = firstNonEmpty(state.PublicDNS, state.PublicIP)
+		}
 		h.Provider.State = state.State
 	}
 	return config.SaveGlobal(s.Global)
@@ -426,6 +429,16 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// cloudSSHHostname picks the address used for outbound SSH to a cloud instance.
+// Prefer the public IP: split-horizon DNS often resolves EC2 public DNS names to
+// unreachable private VPC addresses on VPN or corporate resolvers.
+func cloudSSHHostname(publicIP, publicDNS string) string {
+	if ip := strings.TrimSpace(publicIP); ip != "" {
+		return ip
+	}
+	return strings.TrimSpace(publicDNS)
 }
 
 func ProviderLogin(ctx context.Context, g *config.Global, out *output.Printer, profile, region string) error {

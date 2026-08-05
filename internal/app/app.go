@@ -99,7 +99,10 @@ func (r *Runner) Logs(ctx context.Context, follow bool) error {
 }
 
 func (r *Runner) Status(ctx context.Context) (string, error) {
-	return inspect.RunOutput(ctx, r.Exec, fmt.Sprintf("docker inspect --format '{{.State.Status}}' %s", quote(r.Container())))
+	// Docker returns exit 1 when the standalone application has not been
+	// started. Make that normal state observable instead of leaking Docker's
+	// template/inspect error to the user.
+	return inspect.RunOutput(ctx, r.Exec, fmt.Sprintf("docker inspect --format '{{.State.Status}}' %s 2>/dev/null || printf 'missing\\n'", quote(r.Container())))
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }

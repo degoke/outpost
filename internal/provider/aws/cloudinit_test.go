@@ -18,6 +18,7 @@ func TestCloudInitUserData(t *testing.T) {
 	script := string(decoded)
 	require.Contains(t, script, base64.StdEncoding.EncodeToString([]byte(key)))
 	require.Contains(t, script, "base64 --decode")
+	require.Contains(t, script, "printf '\\n' >> /home/outpost/.ssh/authorized_keys")
 	require.Contains(t, script, "outpost")
 	require.Contains(t, script, "machines")
 	require.Contains(t, script, "OUTPOST_CLOUD_INIT_OK")

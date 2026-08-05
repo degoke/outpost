@@ -37,3 +37,23 @@ func TestDetachedRunUsesProjectContainerName(t *testing.T) {
 	require.Zero(t, code)
 	require.Equal(t, "docker run --name 'outpost-app-my-api' -p '8080:8080' -d 'outpost-app-my-api' 'serve' '--debug'", exec.LastCommand())
 }
+
+func TestStatusReportsMissingContainerWithoutInspectError(t *testing.T) {
+	exec := mock.New()
+	runner := &appsvc.Runner{
+		Exec:    exec,
+		Project: &config.Project{Name: "my-api"},
+		Out:     output.New(true, false),
+	}
+	exec.Responses["docker inspect --format '{{.State.Status}}' 'outpost-app-my-api' 2>/dev/null || printf 'missing\\n'"] = struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+		Err      error
+	}{Stdout: "missing\n"}
+
+	status, err := runner.Status(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "missing\n", status)
+	require.Contains(t, exec.LastCommand(), "|| printf 'missing\\n'")
+}

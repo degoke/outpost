@@ -185,6 +185,15 @@ func setupAWSHost() error {
 	if err != nil {
 		return fmt.Errorf("host create: %w\n%s", err, stderr)
 	}
+
+	_, stderr, err = runOutpost(ctx, "", "host", "update-ssh-access", testHostName)
+	if err != nil {
+		return fmt.Errorf("host update-ssh-access: %w\n%s", err, stderr)
+	}
+	_, stderr, err = runOutpost(ctx, "", "host", "verify", "--yes")
+	if err != nil {
+		return fmt.Errorf("host verify: %w\n%s", err, stderr)
+	}
 	return nil
 }
 

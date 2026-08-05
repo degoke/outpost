@@ -18,6 +18,7 @@ if ! id -u %s >/dev/null 2>&1; then
 fi
 mkdir -p /home/%s/.ssh
 echo '%s' | base64 --decode >> /home/%s/.ssh/authorized_keys
+printf '\n' >> /home/%s/.ssh/authorized_keys
 chmod 700 /home/%s/.ssh
 chmod 600 /home/%s/.ssh/authorized_keys
 chown -R %s:%s /home/%s/.ssh
@@ -32,7 +33,7 @@ touch "$OUTPOST_BASE/share/authorized_keys"
 chmod 600 "$OUTPOST_BASE/share/authorized_keys"
 
 echo "OUTPOST_CLOUD_INIT_OK"
-`, outpostUser, outpostUser, outpostUser, encodedKey, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser)
+`, outpostUser, outpostUser, outpostUser, encodedKey, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser, outpostUser)
 	return base64.StdEncoding.EncodeToString([]byte(script))
 }
 

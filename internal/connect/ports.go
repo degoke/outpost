@@ -149,7 +149,11 @@ func dedupeMappings(mappings []PortMapping) []PortMapping {
 	seen := map[string]bool{}
 	out := make([]PortMapping, 0, len(mappings))
 	for _, m := range mappings {
-		key := fmt.Sprintf("%s:%d:%d", m.Service, m.HostPort, m.TargetPort)
+		bindHost := m.BindHost
+		if bindHost == "" {
+			bindHost = "127.0.0.1"
+		}
+		key := fmt.Sprintf("%s:%d", bindHost, m.HostPort)
 		if seen[key] {
 			continue
 		}

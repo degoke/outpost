@@ -136,6 +136,12 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if rel == ".outpost" || strings.HasPrefix(rel, ".outpost"+string(filepath.Separator)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)

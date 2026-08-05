@@ -227,16 +227,37 @@ if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
   fi
 fi
 
-# Ensure share authorized_keys file exists
-$need_sudo touch "$OUTPOST_BASE/share/authorized_keys"
-$need_sudo chmod 600 "$OUTPOST_BASE/share/authorized_keys"
+# Ensure share authorized_keys file exists and is readable by the outpost user.
+# sshd opens included paths as the authenticated user, not root.
+$need_sudo install -o outpost -g outpost -m 600 /dev/null "$OUTPOST_BASE/share/authorized_keys"
 
-# Merge authorized_keys include hint
+# Keep the share manifest present even before the first invitation is created.
+# Read-only host checks issue this path directly and should not emit a missing
+# file error on a freshly bootstrapped host.
+share_manifest="$OUTPOST_BASE/share/manifest.yaml"
+if [ ! -f "$share_manifest" ]; then
+  cat > "$share_manifest" <<'OUTPOST_MANIFEST'
+version: 1
+invitations: []
+devices: []
+OUTPOST_MANIFEST
+  $need_sudo chown outpost:outpost "$share_manifest"
+  $need_sudo chmod 600 "$share_manifest"
+fi
+
+# Merge authorized_keys include hint. Keep the include path readable by the
+# outpost user (see install above) so sshd can open it during authentication.
 auth_keys="$HOME/.ssh/authorized_keys"
 if [ -f "$auth_keys" ] && ! grep -q 'outpost/share/authorized_keys' "$auth_keys" 2>/dev/null; then
   mkdir -p "$HOME/.ssh"
-  echo "# Outpost shared access keys" >> "$auth_keys"
-  echo "include /var/lib/outpost/share/authorized_keys" >> "$auth_keys" 2>/dev/null || true
+  tmp_keys=$(mktemp)
+  {
+    echo "# Outpost shared access keys"
+    echo "include $OUTPOST_BASE/share/authorized_keys"
+    cat "$auth_keys"
+  } > "$tmp_keys"
+  mv "$tmp_keys" "$auth_keys"
+  chmod 600 "$auth_keys"
 fi
 
 echo "OUTPOST_OK: bootstrap complete"
@@ -366,7 +387,7 @@ if ! command -v k3d >/dev/null 2>&1; then
 	  k3d_url="https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-$arch"
 	  curl -fsSL "$k3d_url" -o /tmp/k3d
 	  curl -fsSL "https://github.com/k3d-io/k3d/releases/download/v5.8.3/checksums.txt" -o /tmp/k3d-checksums.txt
-	  k3d_sum="$(awk -v f="k3d-linux-$arch" '$2 == f || $2 == "*" f {print $1; exit}' /tmp/k3d-checksums.txt)"
+	  k3d_sum="$(grep -F "k3d-linux-$arch" /tmp/k3d-checksums.txt | awk '{print $1; exit}')"
 	  [ -n "$k3d_sum" ] || { echo "OUTPOST_ERROR: no k3d checksum found"; exit 1; }
 	  printf '%s  %s\n' "$k3d_sum" /tmp/k3d | sha256sum -c -
 	  chmod +x /tmp/k3d

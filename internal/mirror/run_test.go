@@ -19,3 +19,8 @@ func TestDetachedInnerCommandPreservesQuotes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, original, decoded)
 }
+
+func TestJoinCommandArgsPreservesShellArguments(t *testing.T) {
+	require.Equal(t, `node -e 'console.log("run-ok")'`, mirror.JoinCommandArgs([]string{"node", "-e", `console.log("run-ok")`}))
+	require.Equal(t, `sh -c 'echo "hello world"'`, mirror.JoinCommandArgs([]string{"sh", "-c", `echo "hello world"`}))
+}

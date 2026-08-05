@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/degoke/outpost/internal/environment"
@@ -54,6 +55,7 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	if strings.TrimSpace(cmd) == "" {
 		return RunResult{ExitCode: 1}, fmt.Errorf("command is required")
 	}
+	cmd = r.withProjectKubeconfig(cmd)
 
 	var err error
 	if !r.Proj.EnvironmentEnabled() {
@@ -73,6 +75,25 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 	}
 	code, err := r.runForeground(ctx, cmd)
 	return RunResult{ExitCode: code}, err
+}
+
+// withProjectKubeconfig makes kubectl commands use the project cluster's
+// persisted config. The config is mounted with the project directory inside
+// the managed container; relying on kind's default ~/.kube/config leaves its
+// API server set to 0.0.0.0, which is not reachable from the container.
+func (r *Runner) withProjectKubeconfig(cmd string) string {
+	if r.Proj == nil || r.Proj.Kubernetes == nil || strings.Contains(cmd, "KUBECONFIG=") {
+		return cmd
+	}
+	trimmed := strings.TrimSpace(cmd)
+	if trimmed != "kubectl" && !strings.HasPrefix(trimmed, "kubectl ") {
+		return cmd
+	}
+	workdir := "/workspace"
+	if r.Proj.Environment != nil && strings.TrimSpace(r.Proj.Environment.Workdir) != "" {
+		workdir = strings.TrimSpace(r.Proj.Environment.Workdir)
+	}
+	return "KUBECONFIG=" + shellQuote(filepath.Join(workdir, ".outpost", "kubernetes", "kubeconfig")) + " " + cmd
 }
 
 func (r *Runner) runForeground(ctx context.Context, cmd string) (int, error) {

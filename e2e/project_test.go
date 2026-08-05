@@ -37,7 +37,7 @@ func TestProjectRunInExample(t *testing.T) {
 	dir := copyExample(t, "ai-smoke")
 	mustRunOutpost(t, dir, "init", "--no-shell")
 
-	stdout := mustRunOutpost(t, dir, "run", "--", "sh", "-c", "echo e2e-ok")
+	stdout := mustRunOutpost(t, dir, "run", "--", "echo", "e2e-ok")
 	if !strings.Contains(stdout, "e2e-ok") {
 		t.Fatalf("run output missing marker:\n%s", stdout)
 	}

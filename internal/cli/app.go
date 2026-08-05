@@ -589,7 +589,7 @@ func (app *App) projectRunCmd() *cobra.Command {
 				return fmt.Errorf("command is required")
 			}
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{Command: strings.Join(args, " ")})
+				result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{Command: mirror.JoinCommandArgs(args)})
 				if err != nil {
 					return err
 				}

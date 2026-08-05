@@ -91,12 +91,13 @@ func ParseManualPort(spec string) (PortMapping, error) {
 
 func MergePortMappings(base []PortMapping, manual []PortMapping) []PortMapping {
 	if len(manual) == 0 {
-		return base
+		return dedupeMappings(base)
 	}
-	if len(base) == 0 {
-		return manual
-	}
-	return append(base, manual...)
+	// Explicit mappings describe the user's intended local bindings. Put them
+	// first so a manual mapping replaces a discovered Compose mapping that
+	// would otherwise try to bind the same local port twice.
+	merged := append(append([]PortMapping(nil), manual...), base...)
+	return dedupeMappings(merged)
 }
 
 func parsePortEntry(service string, entry any) (PortMapping, error) {

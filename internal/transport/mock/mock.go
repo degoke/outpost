@@ -39,9 +39,9 @@ type Executor struct {
 
 func New() *Executor {
 	return &Executor{
-		Uploads:   map[string][]byte{},
-		Files:     map[string][]byte{},
-		Responses: map[string]Response{},
+		Uploads:     map[string][]byte{},
+		Files:       map[string][]byte{},
+		Responses:   map[string]Response{},
 		HostInfoStr: "mock@localhost:22",
 	}
 }

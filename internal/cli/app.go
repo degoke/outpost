@@ -574,8 +574,8 @@ func (app *App) projectShellCmd() *cobra.Command {
 
 func (app *App) projectRunCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "run [flags] -- COMMAND [ARGS...]",
-		Short:              "Run a command in the remote project environment",
+		Use:   "run [flags] -- COMMAND [ARGS...]",
+		Short: "Run a command in the remote project environment",
 		Long: strings.TrimSpace(`
 Runs a command on the remote host inside the project environment. By default
 Outpost starts a persistent tmux session, attaches your terminal to it, and

@@ -13,15 +13,15 @@ import (
 )
 
 type RunOptions struct {
-	Detach         bool
-	Foreground     bool
-	AttachSession  string
-	SessionName    string
-	NoSync         bool
-	ForceSync      bool
-	NoVenv         bool
-	NoToolchain    bool
-	Command        string
+	Detach        bool
+	Foreground    bool
+	AttachSession string
+	SessionName   string
+	NoSync        bool
+	ForceSync     bool
+	NoVenv        bool
+	NoToolchain   bool
+	Command       string
 }
 
 type RunResult struct {

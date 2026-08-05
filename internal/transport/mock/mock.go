@@ -10,33 +10,50 @@ import (
 	"github.com/degoke/outpost/internal/transport"
 )
 
+type Response struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Err      error
+}
+
+type queuedResponse struct {
+	Match    string
+	Stdout   string
+	Stderr   string
+	ExitCode int
+	Err      error
+}
+
 type Executor struct {
 	mu        sync.Mutex
 	Commands  []string
 	Uploads   map[string][]byte
 	Files     map[string][]byte
-	Responses map[string]struct {
-		Stdout   string
-		Stderr   string
-		ExitCode int
-		Err      error
-	}
-	HostInfoStr string
-	ForwardErr  error
+	Responses map[string]Response
+	// ResponseSequence matches queued responses in order for commands containing Match.
+	ResponseSequence []queuedResponse
+	HostInfoStr      string
+	ForwardErr       error
 }
 
 func New() *Executor {
 	return &Executor{
-		Uploads: map[string][]byte{},
-		Files:   map[string][]byte{},
-		Responses: map[string]struct {
-			Stdout   string
-			Stderr   string
-			ExitCode int
-			Err      error
-		}{},
+		Uploads:   map[string][]byte{},
+		Files:     map[string][]byte{},
+		Responses: map[string]Response{},
 		HostInfoStr: "mock@localhost:22",
 	}
+}
+
+func (m *Executor) EnqueueResponse(match string, exitCode int, stdout string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ResponseSequence = append(m.ResponseSequence, queuedResponse{
+		Match:    match,
+		ExitCode: exitCode,
+		Stdout:   stdout,
+	})
 }
 
 func (m *Executor) HostInfo() string {
@@ -121,12 +138,18 @@ type nopCloser struct{}
 
 func (nopCloser) Close() error { return nil }
 
-func (m *Executor) matchResponse(cmd string) (struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	Err      error
-}, bool) {
+func (m *Executor) matchResponse(cmd string) (Response, bool) {
+	for i, queued := range m.ResponseSequence {
+		if strings.Contains(cmd, queued.Match) {
+			m.ResponseSequence = append(m.ResponseSequence[:i], m.ResponseSequence[i+1:]...)
+			return Response{
+				Stdout:   queued.Stdout,
+				Stderr:   queued.Stderr,
+				ExitCode: queued.ExitCode,
+				Err:      queued.Err,
+			}, true
+		}
+	}
 	if r, ok := m.Responses[cmd]; ok {
 		return r, true
 	}
@@ -135,12 +158,7 @@ func (m *Executor) matchResponse(cmd string) (struct {
 			return r, true
 		}
 	}
-	return struct {
-		Stdout   string
-		Stderr   string
-		ExitCode int
-		Err      error
-	}{}, false
+	return Response{}, false
 }
 
 func (m *Executor) LastCommand() string {

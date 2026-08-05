@@ -40,6 +40,14 @@ func TestComposeOpenHealth(t *testing.T) {
 		_, _, _ = runOutpostAllowFail(t, dir, "compose", "down")
 	})
 
+	// Wait for the app to become reachable on the remote host before opening
+	// the local tunnel; compose up -d can return before the health endpoint
+	// is ready, which made this test flaky on slower hosts.
+	health := mustRunOutpost(t, dir, "compose", "exec", "-T", "app", "node", "-e", `fetch("http://127.0.0.1:3000/health").then(r=>r.text()).then(t=>{console.log(t);if(!t.includes("ok"))process.exit(1)})`)
+	if !strings.Contains(health, "ok") {
+		t.Fatalf("remote health check failed before open:\n%s", health)
+	}
+
 	mustRunOutpost(t, dir, "open", "--port", "3000:3000")
 	t.Cleanup(func() {
 		_, _, _ = runOutpostAllowFail(t, dir, "close")

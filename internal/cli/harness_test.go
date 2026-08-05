@@ -16,19 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockResp struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
-	Err      error
+func mockOK(stdout string) mock.Response {
+	return mock.Response{Stdout: stdout}
 }
 
-func mockOK(stdout string) mockResp {
-	return mockResp{Stdout: stdout}
-}
-
-func mockExit(code int, stdout string) mockResp {
-	return mockResp{Stdout: stdout, ExitCode: code}
+func mockExit(code int, stdout string) mock.Response {
+	return mock.Response{Stdout: stdout, ExitCode: code}
 }
 
 type cliEnv struct {

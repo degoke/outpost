@@ -27,7 +27,7 @@ my-repo/
 └── src/
 ```
 
-Global CLI state lives in `~/.outpost/` (hosts, SSH keys, port-forward sessions) — separate from repo metadata.
+Global CLI state lives in `~/.outpost/` (hosts, SSH keys, port-forward sessions, run session metadata) — separate from repo metadata.
 
 ## Managed development environment
 
@@ -37,6 +37,7 @@ Each project gets one managed Docker container on the host when `environment.ena
 - `.devcontainer/devcontainer.json` is honored for image, workspace, env, ports, mounts, and builds
 - Go, Node, and Python toolchains can be auto-detected and installed in auto-built images
 - `outpost shell` keeps the workspace synchronized while you work
+- `outpost run` starts a persistent tmux session by default — commands keep running if SSH drops
 - `outpost ai` runs a remote AI agent and pulls changes back when you exit
 
 Set `environment.enabled: false` in `project.yaml` to run directly on the host without a managed container.
@@ -71,6 +72,9 @@ outpost init --no-shell            # metadata only (CI)
 outpost shell
 outpost ai
 outpost run -- npm test
+outpost run --detach --name batch1 -- python train.py   # survives disconnect
+outpost session list
+outpost session attach batch1
 outpost compose up
 outpost compose logs -f
 outpost compose down

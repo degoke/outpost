@@ -20,7 +20,8 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Fatalf("cluster status unexpected output:\n%s", stdout)
 	}
 
-	nodes := mustRunOutpost(t, dir, "run", "--", "kubectl", "get", "nodes", "--no-headers")
+	// Use --foreground so e2e (non-TTY) runs kubectl directly without tmux.
+	nodes := mustRunOutpost(t, dir, "run", "--foreground", "--", "kubectl", "get", "nodes", "--no-headers")
 	if strings.TrimSpace(nodes) == "" {
 		t.Fatalf("kubectl get nodes returned empty output")
 	}

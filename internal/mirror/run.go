@@ -13,19 +13,26 @@ import (
 )
 
 type RunOptions struct {
-	Detach      bool
-	SessionName string
-	NoSync      bool
-	ForceSync   bool
-	NoVenv      bool
-	NoToolchain bool
-	Command     string
+	Detach         bool
+	Foreground     bool
+	AttachSession  string
+	SessionName    string
+	NoSync         bool
+	ForceSync      bool
+	NoVenv         bool
+	NoToolchain    bool
+	Command        string
 }
 
 type RunResult struct {
-	ExitCode    int
-	SessionName string
+	ExitCode    int    `json:"exit_code"`
+	SessionName string `json:"session_name,omitempty"`
+	Detached    bool   `json:"detached,omitempty"`
 }
+
+// ExitSessionDetached is returned when the user detaches from a tmux session
+// that is still running. Scripts can distinguish this from a completed run.
+const ExitSessionDetached = 130
 
 func (r *Runner) Sync(ctx context.Context) error {
 	return r.SyncWith(ctx, SyncOptions{
@@ -35,6 +42,10 @@ func (r *Runner) Sync(ctx context.Context) error {
 }
 
 func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
+	if opts.AttachSession != "" {
+		return r.attachAndFinish(ctx, opts.AttachSession)
+	}
+
 	if !opts.NoSync {
 		if opts.ForceSync {
 			if err := r.syncAndRecord(ctx); err != nil {
@@ -70,11 +81,47 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (RunResult, error) {
 		cmd = RewritePythonCommand(venvExists, r.VenvPath(), cmd, opts.NoVenv)
 	}
 
-	if opts.Detach {
-		return r.runDetached(ctx, opts, cmd)
+	if opts.Detach || (IsInteractiveTerminal() && !opts.Foreground) {
+		result, err := r.runDetached(ctx, opts, cmd)
+		if err != nil || opts.Detach {
+			return result, err
+		}
+		return r.attachAndFinish(ctx, result.SessionName)
 	}
 	code, err := r.runForeground(ctx, cmd)
 	return RunResult{ExitCode: code}, err
+}
+
+func (r *Runner) attachAndFinish(ctx context.Context, sessionName string) (RunResult, error) {
+	if err := r.AttachSession(ctx, sessionName); err != nil {
+		if finished, ok := IsSessionFinished(err); ok {
+			return RunResult{ExitCode: finished.ExitCode, SessionName: finished.Name}, nil
+		}
+		return RunResult{ExitCode: 1, SessionName: sessionName}, err
+	}
+	status, err := r.SessionStatus(ctx, sessionName)
+	if err != nil {
+		return RunResult{ExitCode: 1, SessionName: sessionName}, err
+	}
+	result := RunResult{SessionName: sessionName}
+	if status.Running {
+		if r.Out != nil && !r.Out.JSON {
+			r.Out.Info("Session %q is still running", sessionName)
+			r.Out.Info("Reconnect with: outpost session attach %s", sessionName)
+		}
+		result.ExitCode = ExitSessionDetached
+		result.Detached = true
+		return result, nil
+	}
+	if status.ExitCode != nil {
+		result.ExitCode = *status.ExitCode
+		return result, nil
+	}
+	if r.Out != nil && !r.Out.JSON {
+		r.Out.Info("Session %q finished but exit code is unknown", sessionName)
+	}
+	result.ExitCode = 1
+	return result, nil
 }
 
 // withProjectKubeconfig makes kubectl commands use the project cluster's
@@ -123,20 +170,8 @@ func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (
 		if err := environment.New(r.Exec, r.Proj, r.Cwd).Ensure(ctx); err != nil {
 			return RunResult{ExitCode: 1}, err
 		}
-		name := strings.TrimSpace(opts.SessionName)
-		if name == "" {
-			name = DefaultSessionName()
-		}
 		container := environment.New(r.Exec, r.Proj, r.Cwd).Name()
-		background := fmt.Sprintf("docker exec -d %s %s -lc %s", shellQuote(container), shellQuote("/bin/bash"), shellQuote(cmd))
-		code, err := r.Exec.Run(ctx, background, transport.RunOpts{})
-		if err != nil {
-			return RunResult{ExitCode: 1}, err
-		}
-		if code != 0 {
-			return RunResult{ExitCode: 1}, fmt.Errorf("failed to start detached command %q", name)
-		}
-		return RunResult{SessionName: name}, nil
+		cmd = fmt.Sprintf("docker exec %s %s -lc %s", shellQuote(container), shellQuote("/bin/bash"), shellQuote(cmd))
 	}
 	if err := EnsureTmux(ctx, r.Exec, r.Out); err != nil {
 		return RunResult{ExitCode: 1}, err
@@ -171,6 +206,13 @@ func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (
 		return RunResult{ExitCode: 1}, fmt.Errorf("could not create remote session log directory")
 	}
 
+	truncateCmd := fmt.Sprintf("> %s", shellQuote(logPath))
+	if code, err := r.Exec.Run(ctx, truncateCmd, transport.RunOpts{WorkDir: r.Proj.RemoteDir}); err != nil {
+		return RunResult{ExitCode: 1}, err
+	} else if code != 0 {
+		return RunResult{ExitCode: 1}, fmt.Errorf("could not prepare session log file")
+	}
+
 	inner := detachedInnerCommand(cmd, logPath)
 	bashCmd := "bash -lc " + shellQuote(inner)
 	tmuxCmd := fmt.Sprintf("tmux new-session -d -s %s -c %s %s",
@@ -196,7 +238,17 @@ func (r *Runner) runDetached(ctx context.Context, opts RunOptions, cmd string) (
 		StartedAt: nowUTC(),
 	}
 	if err := SaveSessionMeta(meta); err != nil {
-		return RunResult{ExitCode: 1}, err
+		if r.Out != nil && !r.Out.JSON {
+			r.Out.Info("Warning: started session %q but could not save local metadata: %v", shortName, err)
+			r.Out.Info("Reconnect with: outpost session attach %s", shortName)
+			r.Out.Info("Check status with: outpost session status %s", shortName)
+		}
+		return RunResult{SessionName: shortName}, nil
+	}
+	if r.Out != nil && !r.Out.JSON {
+		r.Out.Success("Started run session %q", shortName)
+		r.Out.Info("Reconnect with: outpost session attach %s", shortName)
+		r.Out.Info("Check status with: outpost session status %s", shortName)
 	}
 	return RunResult{SessionName: shortName}, nil
 }
@@ -210,6 +262,10 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func IsInteractiveTerminal() bool {
+	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
 }
 
 func detachedInnerCommand(cmd, logPath string) string {

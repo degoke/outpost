@@ -125,6 +125,7 @@ func (app *App) buildRoot() *cobra.Command {
 	// Project-first commands.
 	root.AddCommand(app.projectShellCmd())
 	root.AddCommand(app.projectRunCmd())
+	root.AddCommand(app.sessionCmd())
 	root.AddCommand(app.projectAICmd())
 	root.AddCommand(app.projectOpenCmd())
 	root.AddCommand(app.projectCloseCmd())
@@ -538,7 +539,7 @@ func (app *App) initCmd() *cobra.Command {
 			if !writeGitignore {
 				app.Out.Info("Tip: run with --write-gitignore to keep .outpost/ out of git (local-only config)")
 			}
-			if openShell && !noShell && !app.Out.JSON && isInteractiveTerminal() {
+			if openShell && !noShell && !app.Out.JSON && mirror.IsInteractiveTerminal() {
 				app.Out.Step("")
 				app.Out.Step("Opening remote shell — type exit to return")
 				return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
@@ -556,17 +557,12 @@ func (app *App) initCmd() *cobra.Command {
 	return cmd
 }
 
-func isInteractiveTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
 func (app *App) projectShellCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "shell",
 		Short: "Open the remote project development environment",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !app.Out.JSON && isInteractiveTerminal() {
+			if !app.Out.JSON && mirror.IsInteractiveTerminal() {
 				app.Out.Step("Opening remote shell — type exit to return")
 			}
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
@@ -578,25 +574,44 @@ func (app *App) projectShellCmd() *cobra.Command {
 
 func (app *App) projectRunCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:                "run -- COMMAND [ARGS...]",
+		Use:                "run [flags] -- COMMAND [ARGS...]",
 		Short:              "Run a command in the remote project environment",
+		Long: strings.TrimSpace(`
+Runs a command on the remote host inside the project environment. By default
+Outpost starts a persistent tmux session, attaches your terminal to it, and
+keeps the command running if SSH disconnects.
+
+Use --detach to start without attaching, then reconnect with:
+  outpost session attach NAME
+  outpost session status NAME
+  outpost session logs NAME -f
+
+Use --foreground for the legacy SSH-attached behavior (stops when you disconnect).`),
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 && args[0] == "--" {
-				args = args[1:]
+			flags, cmdArgs, err := mirror.ParseRunCLIArgs(args)
+			if err != nil {
+				return err
 			}
-			if len(args) == 0 {
+			if flags.Attach != "" {
+				return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
+					result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{
+						AttachSession: flags.Attach,
+					})
+					return exitRunResult(app, result, err)
+				})
+			}
+			if len(cmdArgs) == 0 {
 				return fmt.Errorf("command is required")
 			}
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
-				result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{Command: mirror.JoinCommandArgs(args)})
-				if err != nil {
-					return err
-				}
-				if result.ExitCode != 0 {
-					os.Exit(result.ExitCode)
-				}
-				return nil
+				result, err := mirror.New(exec, proj, app.Cwd, h.Name, app.Out).Run(ctx, mirror.RunOptions{
+					Command:     mirror.JoinCommandArgs(cmdArgs),
+					Detach:      flags.Detach,
+					Foreground:  flags.Foreground,
+					SessionName: flags.Name,
+				})
+				return exitRunResult(app, result, err)
 			})
 		},
 	}
@@ -625,7 +640,7 @@ positional command or ai.command in project.yaml.`),
 			if command == "" && len(args) > 0 {
 				command = strings.Join(args, " ")
 			}
-			if !app.Out.JSON && isInteractiveTerminal() {
+			if !app.Out.JSON && mirror.IsInteractiveTerminal() {
 				app.Out.Step("Opening remote AI session — exit the agent to return")
 			}
 			return app.withProjectExecutor(func(ctx context.Context, exec transport.Executor, h *config.Host, proj *config.Project) error {
@@ -1030,7 +1045,7 @@ func (app *App) connectStart(opts connectStartOpts) error {
 			return err
 		}
 		hostName := app.resolveHostName(proj)
-		sess, err := connect.WaitForSession(hostName, proj.Name, 15*time.Second)
+		sess, err := connect.WaitForSession(hostName, proj.Name, 60*time.Second)
 		if err != nil {
 			return fmt.Errorf("started background forwarder (pid %d) but session was not ready: %w", pid, err)
 		}
